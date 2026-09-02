@@ -44,6 +44,20 @@ body,
   font-variant-numeric: tabular-nums;
 }
 
+/* 全站宣纸纹理叠加(浮世绘一致性) */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: url(/assets/overlays/paper-grain.svg);
+  background-size: 256px 256px;
+  background-repeat: repeat;
+  opacity: 0.045;
+  mix-blend-mode: multiply;
+  z-index: 9999;
+}
+
 button {
   font: inherit;
   cursor: pointer;
@@ -98,6 +112,45 @@ select:focus {
   margin: 0 auto;
   padding: 24px 20px;
   min-height: 100%;
+  position: relative;
+}
+
+/* 页面级背景(浮世绘 AI 出图) — 蒙在 panel 上方不读 */
+.page-login,
+.page-lobby,
+.page-room {
+  min-height: 100vh;
+  background-position: center;
+  background-size: cover;
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+
+.page-login {
+  background-image:
+    linear-gradient(180deg, rgba(13, 16, 14, 0.55), rgba(13, 16, 14, 0.78)),
+    url(/assets/lobby/login-bg.jpg);
+}
+
+.page-lobby {
+  background-image:
+    linear-gradient(180deg, rgba(13, 16, 14, 0.6), rgba(13, 16, 14, 0.85)),
+    url(/assets/lobby/lobby-bg.jpg);
+}
+
+.page-room {
+  background-image:
+    linear-gradient(180deg, rgba(13, 16, 14, 0.55), rgba(13, 16, 14, 0.78)),
+    url(/assets/lobby/room-bg.jpg);
+}
+
+/* 给 page 增加可读性的面板玻璃磨砂 */
+.page-login .panel,
+.page-lobby .panel,
+.page-room .panel {
+  background: rgba(22, 27, 23, 0.82);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
 .panel {
@@ -299,21 +352,35 @@ select:focus {
   display: none;
 }
 
-/* 卡背 */
+/* 卡背:浮世绘 SVG 立绘 /assets/cards/back/card-back.svg */
 .pcard-back .pcard-face,
 .pcard.pcard-back {
-  background:
-    repeating-linear-gradient(45deg, #1c231d, #1c231d 6px, #161c17 6px, #161c17 12px),
-    #161c17;
-  border: 1px solid #2c352d;
+  background: none;
+  border: none;
+  position: relative;
 }
 
-.pcard.pcard-back {
-  background: none;
+.pcard.pcard-back::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 9px;
+  border: 2px solid #c6a14a;
+  background:
+    radial-gradient(ellipse at 50% 42%, #f3e6c4 0%, #e8d8a8 65%, #c9b483 100%),
+    url(/assets/cards/back/card-back.svg);
+  background-size: cover;
+  background-position: center;
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.45),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .pcard.pcard-back::after {
-  opacity: 0.09;
+  background-image:
+    radial-gradient(ellipse at 50% 42%, transparent 50%, rgba(0, 0, 0, 0.4) 100%),
+    var(--noise);
+  opacity: 0.05;
 }
 
 /* ============================================================
@@ -327,7 +394,10 @@ select:focus {
   flex-direction: column;
   overflow: hidden;
   background:
-    radial-gradient(ellipse at 50% 38%, #222a24 0%, #151b16 55%, var(--bg) 100%);
+    radial-gradient(ellipse 50% 38% at 50% 38%, rgba(245, 234, 208, 0.12), transparent 70%),
+    url(/assets/table/stage-light.svg) center / 60vmin no-repeat,
+    url(/assets/table/table-felt-pattern.svg) repeat,
+    linear-gradient(180deg, #1a1410, #0d0a08);
 }
 
 .table-root::before {
@@ -344,7 +414,7 @@ select:focus {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse at center, transparent 52%, rgba(0, 0, 0, 0.55) 100%);
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(0, 0, 0, 0.62) 100%);
   pointer-events: none;
   z-index: 1;
 }
@@ -430,11 +500,27 @@ select:focus {
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #2e3830, #171d18);
+  background-color: #171d18;
+  background-image: var(--avatar, radial-gradient(circle at 35% 30%, #2e3830, #171d18));
+  background-size: cover;
+  background-position: center;
   border: 2px solid #37423a;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* 房间等待室玩家列表小头像 */
+.player-mini-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: #171d18;
+  background-image: var(--av, radial-gradient(circle at 35% 30%, #2e3830, #171d18));
+  background-size: cover;
+  background-position: center;
+  border: 2px solid #37423a;
+  flex-shrink: 0;
 }
 
 .seat-emoji {
@@ -994,4 +1080,143 @@ select:focus {
   .seat-marker {
     animation: none !important;
   }
+}
+
+/* ============================================================
+   迭代一新增：回合计时 / 表情 / 开关 / 观战提示
+   ============================================================ */
+
+.seat-timer {
+  position: absolute;
+  bottom: -4px;
+  right: -6px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(13, 16, 14, 0.9);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.seat-timer.is-urgent {
+  border-color: var(--danger);
+  color: #ffb3b3;
+  animation: timer-blink 0.8s ease-in-out infinite;
+}
+
+@keyframes timer-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.seat-emote {
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  translate: -50%;
+  font-size: 26px;
+  background: rgba(13, 16, 14, 0.85);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-2);
+  pointer-events: none;
+  z-index: 20;
+}
+
+.turn-count {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+}
+
+.turn-count.is-urgent {
+  color: #ffb3b3;
+  animation: timer-blink 0.8s ease-in-out infinite;
+}
+
+/* 表情轮盘 */
+.emote-wrap {
+  position: relative;
+}
+
+.action-emote {
+  font-size: 18px;
+  padding: 9px 13px;
+}
+
+.emote-wheel {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  translate: -50%;
+  display: grid;
+  grid-template-columns: repeat(4, 44px);
+  gap: 6px;
+  padding: 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-3);
+  z-index: 120;
+}
+
+.emote-wheel button {
+  font-size: 20px;
+  padding: 6px 0;
+  background: var(--bg-card);
+  border-radius: 10px;
+}
+
+.emote-wheel button:hover {
+  background: #2a322b;
+  transform: scale(1.12);
+}
+
+/* 设置开关 */
+.action-toggle {
+  font-size: 15px;
+  padding: 9px 11px;
+  opacity: 0.55;
+}
+
+.action-toggle.is-on {
+  opacity: 1;
+  border: 1px solid var(--border);
+}
+
+/* 观战提示 */
+.spectate-note {
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+  padding: 4px 0 6px;
+  letter-spacing: 1px;
+}
+
+/* 自己的表情反馈 */
+.self-emote {
+  font-size: 22px;
+  animation: emote-pop 0.3s ease-out;
+}
+
+@keyframes emote-pop {
+  0% { transform: scale(0.3); opacity: 0; }
+  60% { transform: scale(1.2); }
+  100% { transform: scale(1); opacity: 1; }
 }

@@ -1,4 +1,4 @@
-import { Room, type Client } from 'colyseus';
+import { Room, type Client, type Delayed } from 'colyseus';
 import {
   MAX_PLAYERS,
   MIN_PLAYERS,
@@ -31,13 +31,23 @@ function generateRoomCode(): string {
   throw new Error('无法生成房间码');
 }
 
+/** 回合决策计时（炉石 75s/Master Duel 决策走表原则；测试可覆盖 GameRoom.turnTimeoutMs） */
+const TURN_TIMEOUT_MS = 45_000;
+
+/** 表情白名单（预设制：社交层可控毒，EK2 同款思路） */
+const EMOTE_ALLOWLIST = ['😂', '😭', '😱', '😡', '👍', '👎', '❤️', '🎉', '💀', '🤔', '😼', '😸'];
+
 export class GameRoom extends Room<{ state: GameState }> {
+  /** 回合计时毫秒数（测试可覆盖） */
+  static turnTimeoutMs = TURN_TIMEOUT_MS;
+
   maxClients = MAX_PLAYERS;
   patchRate = 50;
 
   private engine = new GameEngine();
   private pendingDeck: DeckDef | null = null;
   private nopeTimer: ReturnType<typeof setTimeout> | null = null;
+  private turnTimer: Delayed | null = null;
 
   onCreate(): void {
     const code = generateRoomCode();
@@ -52,6 +62,15 @@ export class GameRoom extends Room<{ state: GameState }> {
       } catch (e) {
         this.sendError(client, e instanceof Error ? e.message : '服务器内部错误');
       }
+    });
+
+    // 表情：预设白名单广播（不进引擎，不影响对局）
+    this.onMessage('emote', (client: Client, msg: { emoji?: string }) => {
+      const emoji = typeof msg?.emoji === 'string' ? msg.emoji : '';
+      if (!EMOTE_ALLOWLIST.includes(emoji)) return;
+      const p = this.engine.players.find((x) => x.sessionId === client.sessionId);
+      if (!p) return;
+      this.broadcast('emote', { sessionId: client.sessionId, name: p.name, emoji });
     });
   }
 
@@ -110,7 +129,55 @@ export class GameRoom extends Room<{ state: GameState }> {
 
   onDispose(): void {
     if (this.nopeTimer) clearTimeout(this.nopeTimer);
+    this.turnTimer?.clear();
     activeCodes.delete(this.state.roomCode);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 回合计时器（服务端权威；超时自动行动，不判负）                        */
+  /* ------------------------------------------------------------------ */
+
+  private armTurnTimer(): void {
+    this.turnTimer?.clear();
+    this.turnTimer = null;
+    if (this.engine.phase !== 'playing') {
+      this.state.turnEndsAt = 0;
+      return;
+    }
+    // 否认窗口有独立的 8 秒计时，不叠回合计时
+    if (this.engine.subPhase === 'awaiting-nope') {
+      this.state.turnEndsAt = 0;
+      return;
+    }
+    this.state.turnEndsAt = this.clock.currentTime + GameRoom.turnTimeoutMs;
+    this.turnTimer = this.clock.setTimeout(() => {
+      this.turnTimer = null;
+      this.autoActOnTimeout();
+    }, GameRoom.turnTimeoutMs);
+  }
+
+  private autoActOnTimeout(): void {
+    const e = this.engine;
+    if (e.phase !== 'playing') return;
+    const cur = e.current();
+    if (!cur || !cur.connected) {
+      // 当前玩家掉线：交给重连判死流程，不替他行动
+      this.armTurnTimer();
+      return;
+    }
+    if (e.subPhase === 'awaiting-action') {
+      this.process(e.drawCard(cur.sessionId)); // 超时自动摸牌结束回合
+    } else if (e.subPhase === 'awaiting-defuse' && e.pendingDefuse?.sessionId === cur.sessionId) {
+      this.process(e.defusePosition(cur.sessionId, 0)); // 放回牌堆顶
+    } else if (
+      e.subPhase === 'awaiting-alter' &&
+      e.pendingAlter?.sessionId === cur.sessionId
+    ) {
+      const n = e.pendingAlter.cards.length;
+      this.process(e.alterFutureOrder(cur.sessionId, Array.from({ length: n }, (_, i) => i)));
+    }
+    this.sync();
+    this.armTurnTimer();
   }
 
   /* ------------------------------------------------------------------ */
@@ -206,6 +273,7 @@ export class GameRoom extends Room<{ state: GameState }> {
       }
     }
     this.sync();
+    this.armTurnTimer();
   }
 
   /* ------------------------------------------------------------------ */
@@ -226,11 +294,15 @@ export class GameRoom extends Room<{ state: GameState }> {
           break;
         case 'nopeWindowOpened': {
           this.state.nopeEndsAt = Date.now() + NOPE_WINDOW_MS;
+          this.turnTimer?.clear(); // 否认窗口期暂停回合计时
+          this.turnTimer = null;
+          this.state.turnEndsAt = 0;
           if (this.nopeTimer) clearTimeout(this.nopeTimer);
           this.nopeTimer = setTimeout(() => {
             this.nopeTimer = null;
             this.process(this.engine.resolveNopes());
             this.sync();
+            this.armTurnTimer();
           }, NOPE_WINDOW_MS);
           break;
         }

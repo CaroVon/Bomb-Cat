@@ -48,7 +48,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="page">
+    <div className="page page-login">
       <div className="auth-box panel">
         <div className="title" style={{ marginBottom: 4 }}>
           💥 炸弹猫

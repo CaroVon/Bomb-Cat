@@ -46,6 +46,14 @@ function CardViewInner({
   }
 
   const skin = skinMap[def.id];
+  // 内置卡 fallback:指向 scripts/gen-assets 生成的图(jpg|webp|png 自动 sniff)
+  const defaultSkin = def.id === 'exploding' || def.id === 'defuse' || def.id === 'attack' ||
+    def.id === 'targetedAttack' || def.id === 'skip' || def.id === 'favor' ||
+    def.id === 'shuffle' || def.id === 'peek' || def.id === 'nope' ||
+    def.id.startsWith('plain-')
+    ? `/assets/cards/front/${def.id}.jpg`
+    : null;
+  const skinUrl = skin || defaultSkin;
   const frame = KIND_FRAME[def.kind] ?? KIND_FRAME.action!;
 
   return (
@@ -60,7 +68,7 @@ function CardViewInner({
       onClick={onClick}
       style={{
         backgroundImage: frame,
-        ...(skin ? { ['--skin' as string]: `url(${skin})` } : {}),
+        ...(skinUrl ? { ['--skin' as string]: `url(${skinUrl})` } : {}),
         ...style,
       }}
       title={def.description}

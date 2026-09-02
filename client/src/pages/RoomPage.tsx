@@ -37,7 +37,7 @@ export default function RoomPage() {
 
   if (!state) {
     return (
-      <div className="page">
+<div className="page page-room">
         <p className="muted">连接中……</p>
       </div>
     );
@@ -75,8 +75,14 @@ export default function RoomPage() {
             {players.map((p) => {
               const ch = BUILTIN_CHARACTERS.find((c) => c.id === p.characterId);
               return (
-                <div className="h-row" key={p.sessionId} style={{ padding: '6px 0' }}>
-                  <span style={{ fontSize: 22 }}>{ch?.emoji ?? '🙂'}</span>
+                <div className="h-row" key={p.sessionId} style={{ padding: '6px 0', alignItems: 'center' }}>
+                  <span
+                    className="player-mini-avatar"
+                    style={{
+                      ['--av' as string]: `url(/assets/characters/${p.characterId || 'none'}.jpg)`,
+                    }}
+                  />
+                  <span style={{ fontSize: 22, display: 'none' }}>{ch?.emoji ?? '🙂'}</span>
                   <span>{p.name}</span>
                   {p.isHost && <span className="tag">房主</span>}
                   <span className="muted" style={{ fontSize: 12 }}>{ch?.name ?? '未选角色'}</span>

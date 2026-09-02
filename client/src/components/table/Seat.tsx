@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 
 export interface SeatData {
   sessionId: string;
@@ -16,9 +17,14 @@ interface Props {
   /** 刚出过牌时头像弹跳 */
   bounced?: boolean;
   emoji: string;
+  /** 当前回合剩余秒数（null=不显示） */
+  timer?: number | null;
+  /** 表情气泡 */
+  emote?: { emoji: string; id: number } | null;
 }
 
-function SeatInner({ seat, isCurrent, bounced, emoji }: Props) {
+function SeatInner({ seat, isCurrent, bounced, emoji, timer, emote }: Props) {
+  const avatarUrl = `/assets/characters/${seat.characterId || 'none'}.jpg`;
   return (
     <div
       className={[
@@ -27,11 +33,18 @@ function SeatInner({ seat, isCurrent, bounced, emoji }: Props) {
         !seat.alive ? 'is-dead' : '',
         bounced ? 'is-bounced' : '',
       ].join(' ')}
+      data-seat={seat.sessionId}
     >
-      <div className="seat-avatar">
-        <span className="seat-emoji">{emoji}</span>
+      <div
+        className="seat-avatar"
+        style={{ ['--avatar' as string]: `url(${avatarUrl})` }}
+      >
+        <span className="seat-emoji" style={{ display: 'none' }}>{emoji}</span>
         {!seat.alive && <span className="seat-skull">💀</span>}
         {isCurrent && seat.alive && <span className="seat-marker">▼</span>}
+        {timer != null && timer > 0 && seat.alive && (
+          <span className={`seat-timer ${timer <= 10 ? 'is-urgent' : ''}`}>{timer}</span>
+        )}
       </div>
       <div className="seat-meta">
         <span className="seat-name">{seat.name}</span>
@@ -49,6 +62,20 @@ function SeatInner({ seat, isCurrent, bounced, emoji }: Props) {
           {!seat.connected && seat.alive && <span className="seat-offline">掉线</span>}
         </span>
       </div>
+      <AnimatePresence>
+        {emote && (
+          <motion.div
+            key={emote.id}
+            className="seat-emote"
+            initial={{ opacity: 0, scale: 0.4, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.6, y: -14 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 22 }}
+          >
+            {emote.emoji}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

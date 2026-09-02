@@ -39,7 +39,7 @@ const EFFECT_LABEL: Record<string, string> = {
 
 export default function EditorPage() {
   return (
-    <div className="page">
+    <div className="page page-room">
       <h2 className="title" style={{ marginTop: 0 }}>🎨 定制工坊</h2>
       <p className="muted" style={{ marginTop: -8 }}>
         换上朋友的照片做卡面、设计你自己的特殊卡牌，房主开局时选用即可生效

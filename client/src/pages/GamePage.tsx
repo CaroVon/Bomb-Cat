@@ -8,13 +8,18 @@ import {
   clearPeek,
   clearPeekHand,
   eachPlayer,
+  lastPlayCardIds,
   leaveRoom,
   sendAct,
+  sendEmote,
   stateLog,
   turnOrderList,
   useGame,
 } from '../lib/game';
 import { activeSkinMap } from '../lib/skins';
+import { animMs, getSettings, setSetting } from '../lib/settings';
+import { sfx } from '../lib/sound';
+import { explodeAt, winCelebration } from '../lib/fx';
 import { CardView, setSkinMap } from '../components/CardView';
 import Modal from '../components/Modal';
 import { Seat, type SeatData } from '../components/table/Seat';
@@ -22,7 +27,6 @@ import { HandFan, type FanCard } from '../components/table/HandFan';
 import { Stage, type StageShow } from '../components/table/Stage';
 import { DiscardPile, DrawPile } from '../components/table/Piles';
 import { BoomBanner, FlashOverlay, TurnBanner } from '../components/table/Effects';
-import { lastPlayCardIds } from '../lib/game';
 
 function cardNeedsTarget(def: CardDef): boolean {
   return def.effects.some(
@@ -34,6 +38,9 @@ function cardNeedsTarget(def: CardDef): boolean {
       e.type === 'targetedAttack',
   );
 }
+
+/** 表情选项（与服务端白名单一致） */
+const EMOTE_CHOICES = ['😂', '😭', '😱', '😡', '👍', '👎', '❤️', '🎉', '💀', '🤔', '😼', '😸'];
 
 export default function GamePage() {
   const game = useGame();
@@ -49,6 +56,11 @@ export default function GamePage() {
   >(null);
   const [skillOpen, setSkillOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [emoteOpen, setEmoteOpen] = useState(false);
+  /** 座位表情气泡：sessionId -> {emoji, id} */
+  const [emoteBubbles, setEmoteBubbles] = useState<Record<string, { emoji: string; id: number }>>({});
+  const [settings, setSettingsState] = useState(getSettings());
+  const celebratedRef = useRef(false);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const pendingPlay = useRef<HandCard | null>(null);
@@ -121,13 +133,14 @@ export default function GamePage() {
 
   const nopeRemaining = Math.max(0, Math.ceil(((state?.nopeEndsAt ?? 0) - now) / 1000));
 
-  // 停留时长与"是否需要他人响应"挂钩（EK2 教训）：否认窗口期持续展示，否则 1.6s
+  // 停留时长与"是否需要他人响应"挂钩（EK2 教训）：否认窗口期持续展示，否则 ~1.6s
   useEffect(() => {
     if (!stage) return;
     if (state?.nopeActive) return;
-    const t = setTimeout(() => setStage(null), 1600);
+    const t = setTimeout(() => setStage(null), animMs(1600));
     return () => clearTimeout(t);
-  }, [stage?.id, state?.nopeActive, state?.lastPlayNoped]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage?.id, state?.nopeActive, state?.lastPlayNoped, settings.fastAnim]);
 
   // 舞台倒计时（否认窗口中）
   const stageCountdown = state?.nopeActive ? nopeRemaining : undefined;
@@ -143,11 +156,60 @@ export default function GamePage() {
     if (at && at !== seenDeath.current) {
       seenDeath.current = at;
       setBoom({ key: at, name: state.lastDeathBy ?? '' });
-      const timer = setTimeout(() => setBoom(null), 1500);
+      sfx('boom');
+      // 从阵亡者座位迸发碎片（找不到座位则从中央）
+      const el = document.querySelector(`[data-seat="${state.lastDeathById ?? ''}"]`);
+      const rect = el?.getBoundingClientRect();
+      if (rect) {
+        explodeAt(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      } else {
+        explodeAt(window.innerWidth / 2, window.innerHeight / 3);
+      }
+      const timer = setTimeout(() => setBoom(null), animMs(1500));
       return () => clearTimeout(timer);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.lastDeathAt]);
+
+  // 表情气泡（2.5s 后消散；可屏蔽）
+  useEffect(() => {
+    const e = game.lastEmote;
+    if (!e) return;
+    if (!getSettings().emotes) return;
+    sfx('emote');
+    setEmoteBubbles((prev) => ({ ...prev, [e.sessionId]: { emoji: e.emoji, id: e.id } }));
+    const t = setTimeout(() => {
+      setEmoteBubbles((prev) => {
+        const next = { ...prev };
+        delete next[e.sessionId];
+        return next;
+      });
+    }, 2500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game.lastEmote?.id]);
+
+  // 出牌音效
+  useEffect(() => {
+    if (stage) sfx('card');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage?.id]);
+
+  // 非法操作提示音
+  useEffect(() => {
+    if (game.toast) sfx('error');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game.toast?.id]);
+
+  // 胜利庆祝（只放一次）
+  const gameEnded = !!game.gameEnd;
+  useEffect(() => {
+    if (gameEnded && !celebratedRef.current) {
+      celebratedRef.current = true;
+      sfx('win');
+      winCelebration();
+    }
+  }, [gameEnded]);
 
   const [banner, setBanner] = useState<{ text: string; gold: boolean } | null>(null);
   const seenTurn = useRef<string | null>(null);
@@ -156,8 +218,10 @@ export default function GamePage() {
     if (cur && seenTurn.current !== cur && state?.phase === 'playing') {
       seenTurn.current = cur;
       const name = playersRef.current.find((p: any) => p.sessionId === cur)?.name ?? '';
-      setBanner({ text: cur === myId ? '你的回合' : `${name} 的回合`, gold: cur === myId });
-      const t = setTimeout(() => setBanner(null), 1500);
+      const gold = cur === myId;
+      setBanner({ text: gold ? '你的回合' : `${name} 的回合`, gold });
+      if (gold) sfx('turn');
+      const t = setTimeout(() => setBanner(null), animMs(1500));
       return () => clearTimeout(t);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -294,6 +358,10 @@ export default function GamePage() {
   const bounceId =
     stage && Date.now() - (state.lastPlayAt ?? 0) < 1200 ? (state.lastPlayById as string) : '';
 
+  /** 当前回合剩余秒数（服务端权威 turnEndsAt） */
+  const turnRemaining =
+    state.turnEndsAt > 0 ? Math.max(0, Math.ceil((state.turnEndsAt - now) / 1000)) : null;
+
   /* ---------------- 渲染 ---------------- */
 
   return (
@@ -310,6 +378,8 @@ export default function GamePage() {
             seat={p as SeatData}
             isCurrent={p.sessionId === currentId}
             bounced={p.sessionId === bounceId}
+            timer={p.sessionId === currentId ? turnRemaining : null}
+            emote={emoteBubbles[p.sessionId] ?? null}
             emoji={
               BUILTIN_CHARACTERS.find((c) => c.id === p.characterId)?.emoji ?? '🙂'
             }
@@ -330,6 +400,11 @@ export default function GamePage() {
 
       {/* 状态条 */}
       <div className="statusline">
+        {me && emoteBubbles[me.sessionId] && (
+          <span className="self-emote" key={emoteBubbles[me.sessionId]!.id}>
+            {emoteBubbles[me.sessionId]!.emoji}
+          </span>
+        )}
         <span className={`status-turn ${isMyTurn ? 'is-mine' : ''}`}>
           {state.phase === 'finished'
             ? '🏆 对局结束'
@@ -357,6 +432,11 @@ export default function GamePage() {
           onClick={() => sendAct({ action: 'draw' })}
         >
           结束回合 · 摸牌
+          {isMyTurn && turnRemaining != null && (
+            <span className={`turn-count ${turnRemaining <= 10 ? 'is-urgent' : ''}`}>
+              {turnRemaining}
+            </span>
+          )}
         </button>
 
         {canNope && (
@@ -367,6 +447,60 @@ export default function GamePage() {
             否认！<span className="nope-count">{nopeRemaining}</span>
           </button>
         )}
+
+        {/* 表情轮盘 */}
+        <div className="emote-wrap">
+          <button className="action-emote" onClick={() => setEmoteOpen((v) => !v)} title="发个表情">
+            😼
+          </button>
+          {emoteOpen && (
+            <div className="emote-wheel">
+              {EMOTE_CHOICES.map((e) => (
+                <button
+                  key={e}
+                  onClick={() => {
+                    sendEmote(e);
+                    setEmoteOpen(false);
+                  }}
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 设置开关：音效 / 表情 / 动画速度 */}
+        <button
+          className={`action-toggle ${settings.sound ? 'is-on' : ''}`}
+          title={settings.sound ? '音效开' : '音效关'}
+          onClick={() => {
+            setSetting('sound', !settings.sound);
+            setSettingsState(getSettings());
+          }}
+        >
+          {settings.sound ? '🔊' : '🔇'}
+        </button>
+        <button
+          className={`action-toggle ${settings.emotes ? 'is-on' : ''}`}
+          title={settings.emotes ? '表情开' : '表情屏蔽'}
+          onClick={() => {
+            setSetting('emotes', !settings.emotes);
+            setSettingsState(getSettings());
+          }}
+        >
+          {settings.emotes ? '💬' : '🚫'}
+        </button>
+        <button
+          className={`action-toggle ${settings.fastAnim ? 'is-on' : ''}`}
+          title={settings.fastAnim ? '动画 2x' : '动画 1x'}
+          onClick={() => {
+            setSetting('fastAnim', !settings.fastAnim);
+            setSettingsState(getSettings());
+          }}
+        >
+          {settings.fastAnim ? '⏩' : '▶️'}
+        </button>
 
         {canAct && selectedSamePlain && selectedCards.length === 2 && (
           <button
@@ -409,6 +543,9 @@ export default function GamePage() {
 
       {/* 手牌 */}
       <footer className="handzone">
+        {me && !me.alive && state.phase === 'playing' && (
+          <div className="spectate-note">👻 你已出局 · 观战中，胜利结算后可返回大厅</div>
+        )}
         <HandFan
           cards={fanCards}
           interactive={!!canAct}

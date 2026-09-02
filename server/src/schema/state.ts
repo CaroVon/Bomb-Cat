@@ -45,6 +45,9 @@ export const GameState = schema(
     defuseBy: t.string().default(''),
     alterBy: t.string().default(''),
 
+    /** 回合截止时间（epoch ms，服务端权威；0=无计时——否认窗口期等） */
+    turnEndsAt: t.number().default(0),
+
     /** 最近一次出牌（中央舞台可视化："谁打了什么牌"） */
     lastPlayBy: t.string().default(''),
     lastPlayById: t.string().default(''),

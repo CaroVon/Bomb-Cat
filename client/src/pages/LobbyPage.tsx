@@ -71,7 +71,7 @@ export default function LobbyPage() {
   }
 
   return (
-    <div className="page">
+    <div className="page page-lobby">
       <div className="h-row" style={{ marginBottom: 20 }}>
         <span className="title">游戏大厅</span>
         <span className="tag">你好，{identity?.name}</span>

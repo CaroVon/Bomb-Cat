@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="light" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#f5ead0" stop-opacity="0.42"/>
+      <stop offset="45%" stop-color="#e8c98a" stop-opacity="0.18"/>
+      <stop offset="80%" stop-color="#c6a14a" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+    <!-- 手绘感 -->
+    <filter id="brushy">
+      <feTurbulence type="fractalNoise" baseFrequency="0.7" numOctaves="2"/>
+      <feDisplacementMap in="SourceGraphic" scale="6"/>
+    </filter>
+  </defs>
+  <circle cx="256" cy="256" r="256" fill="url(#light)" filter="url(#brushy)"/>
+</svg>

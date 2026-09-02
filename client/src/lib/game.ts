@@ -20,6 +20,8 @@ export interface GameSnapshot {
   defusePrompt: number | null;
   gameEnd: Extract<ServerMessage, { action: 'gameEnd' }> | null;
   reconnectHint: { roomId: string; token: string } | null;
+  /** 最近收到的表情（id 用于去重触发动画） */
+  lastEmote: { id: number; sessionId: string; name: string; emoji: string } | null;
 }
 
 let snap: GameSnapshot = {
@@ -36,6 +38,7 @@ let snap: GameSnapshot = {
   defusePrompt: null,
   gameEnd: null,
   reconnectHint: null,
+  lastEmote: null,
 };
 
 const listeners = new Set<() => void>();
@@ -150,6 +153,10 @@ function attach(room: Room<any>): void {
       emit();
     }
   });
+  room.onMessage('emote', (msg: { sessionId: string; name: string; emoji: string }) => {
+    snap.lastEmote = { id: Date.now() + Math.random(), ...msg };
+    emit();
+  });
 
   room.onLeave((code) => {
     if (code === 1000) {
@@ -252,6 +259,10 @@ export function leaveRoom(): void {
 
 export function sendAct(message: ClientMessage): void {
   snap.room?.send('act', message);
+}
+
+export function sendEmote(emoji: string): void {
+  snap.room?.send('emote', { emoji });
 }
 
 export function clearPeek(id: number): void {
