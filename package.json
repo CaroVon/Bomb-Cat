@@ -15,10 +15,12 @@
     "build": "npm run build -w @bombcat/server && npm run build -w @bombcat/client",
     "test": "npm run test -w @bombcat/shared && npm run test -w @bombcat/server",
     "typecheck": "npm run typecheck -w @bombcat/shared && npm run typecheck -w @bombcat/server && npm run typecheck -w @bombcat/client",
-    "gen-assets": "node scripts/gen-assets/generate.cjs"
+    "gen-assets": "node scripts/gen-assets/generate.cjs",
+    "e2e": "playwright test"
   },
   "devDependencies": {
     "@colyseus/sdk": "^0.18.2",
+    "@playwright/test": "^1.62.1",
     "@types/canvas-confetti": "^1.9.0",
     "concurrently": "^9.2.1",
     "dotenv": "^16.4.5"

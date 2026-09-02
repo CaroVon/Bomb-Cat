@@ -43,6 +43,8 @@ export class GameRoom extends Room<{ state: GameState }> {
   static turnTimeoutMs = TURN_TIMEOUT_MS;
   /** 机器人思考间隔毫秒（测试可覆盖） */
   static botDelayMs = 1500;
+  /** 否认窗口毫秒（测试可覆盖；未来可做房间快速模式开关） */
+  static nopeWindowMs = NOPE_WINDOW_MS;
 
   maxClients = MAX_PLAYERS;
   patchRate = 50;
@@ -411,7 +413,7 @@ export class GameRoom extends Room<{ state: GameState }> {
           this.sendPrivate(e.sessionId, { action: 'error', message: e.message });
           break;
         case 'nopeWindowOpened': {
-          this.state.nopeEndsAt = Date.now() + NOPE_WINDOW_MS;
+          this.state.nopeEndsAt = Date.now() + GameRoom.nopeWindowMs;
           this.turnTimer?.clear(); // 否认窗口期暂停回合计时
           this.turnTimer = null;
           this.state.turnEndsAt = 0;
@@ -421,7 +423,7 @@ export class GameRoom extends Room<{ state: GameState }> {
             this.process(this.engine.resolveNopes());
             this.sync();
             this.armTurnTimer();
-          }, NOPE_WINDOW_MS);
+          }, GameRoom.nopeWindowMs);
           break;
         }
         case 'nopeWindowClosed': {

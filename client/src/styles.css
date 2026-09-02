@@ -1220,3 +1220,174 @@ select:focus {
   60% { transform: scale(1.2); }
   100% { transform: scale(1); opacity: 1; }
 }
+
+/* ============================================================
+   移动端适配（竖屏 ≤900px：卡牌缩放 / 紧凑布局 / 触摸目标）
+   ============================================================ */
+
+button,
+.pcard {
+  touch-action: manipulation; /* 防双击缩放 */
+}
+
+@media (max-width: 900px) {
+  /* 卡牌三态缩放 */
+  .pcard.hand {
+    width: 92px;
+  }
+
+  .pcard.hand .pcard-emoji {
+    font-size: 2em;
+  }
+
+  .pcard.hand .pcard-name {
+    font-size: 10px;
+    padding: 4px 2px 5px;
+  }
+
+  .pcard.stage {
+    width: 140px;
+  }
+
+  .pcard.stage .pcard-emoji {
+    font-size: 3em;
+  }
+
+  .pcard.stage .pcard-name {
+    font-size: 13px;
+  }
+
+  .pcard.mini {
+    width: 48px;
+  }
+
+  .pcard.mini .pcard-emoji {
+    font-size: 1.2em;
+  }
+
+  .pcard.mini .pcard-name {
+    display: none;
+  }
+
+  /* 牌桌布局 */
+  .table-center-v2 {
+    gap: 18px;
+  }
+
+  .pile {
+    width: 48px;
+    height: 68px;
+  }
+
+  .opponents-row {
+    gap: 6px;
+    padding: 8px 8px 4px;
+  }
+
+  .seat-v2 {
+    padding: 5px 8px 5px 5px;
+    gap: 7px;
+  }
+
+  .seat-avatar {
+    width: 34px;
+    height: 34px;
+  }
+
+  .seat-emoji {
+    font-size: 18px;
+  }
+
+  .seat-name {
+    font-size: 11px;
+    max-width: 56px;
+  }
+
+  .seat-sub {
+    font-size: 10px;
+  }
+
+  /* 状态与行动条 */
+  .statusline {
+    gap: 10px;
+    font-size: 11px;
+    flex-wrap: wrap;
+  }
+
+  .actionbar {
+    gap: 6px;
+    padding: 6px 8px 2px;
+  }
+
+  .actionbar button {
+    padding: 8px 12px;
+    font-size: 13px;
+    min-height: 40px; /* 触摸目标 */
+  }
+
+  .action-main {
+    padding: 9px 16px;
+    font-size: 14px;
+  }
+
+  .action-toggle {
+    padding: 8px 9px;
+    min-height: 40px;
+    min-width: 40px;
+  }
+
+  /* 手牌区 */
+  .handzone {
+    padding: 0 4px 4px;
+  }
+
+  .handfan {
+    height: 150px;
+  }
+
+  /* 日志收纳为更小 */
+  .log-panel {
+    width: 132px;
+    max-height: 22vh;
+    font-size: 10px;
+    padding: 6px 8px;
+    opacity: 0.85;
+  }
+
+  /* 演出元素 */
+  .turn-banner {
+    font-size: 20px;
+    letter-spacing: 3px;
+    padding: 8px 22px;
+    white-space: nowrap;
+  }
+
+  .boom-banner {
+    font-size: 17px;
+    padding: 9px 18px;
+  }
+
+  .nope-stamp {
+    font-size: 36px;
+    border-width: 3px;
+  }
+
+  .stage-caption {
+    font-size: 12px;
+  }
+
+  /* 弹窗留出触摸空间 */
+  .modal {
+    padding: 18px;
+  }
+
+  .emote-wheel {
+    grid-template-columns: repeat(4, 40px);
+    gap: 5px;
+    padding: 8px;
+  }
+
+  .emote-wheel button {
+    min-height: 40px;
+  }
+}

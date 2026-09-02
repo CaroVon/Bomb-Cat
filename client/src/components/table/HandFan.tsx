@@ -20,33 +20,40 @@ interface Props {
   onCardClick: (card: FanCard) => void;
 }
 
-const CARD_W = 128;
+const DEFAULT_CARD_W = 128;
 const SPRING = { type: 'spring', stiffness: 260, damping: 24 } as const;
 
 /**
  * 炉石式扇形手牌：
  * - 角度：中间 0° 向两侧步进，总开角 clamp ±40°（每张 ≤10°）
- * - 抛物线下沉：y = |i-mid|² × 6
+ * - 抛物线下沉：y = |i-mid|² × 7
  * - transform-origin: center 120%（枢轴在牌下方，弧线自然）
  * - 悬停抬升 44px + 放大 1.1 + z 置顶；重排 spring 补位
+ * - 卡宽实时测量（移动端 CSS 缩小后自动收紧间距）
  */
 export function HandFan({ cards, interactive, selected, playable, onCardClick }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(900);
+  const [cardW, setCardW] = useState(DEFAULT_CARD_W);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const update = () => setWidth(el.clientWidth);
+    const update = () => {
+      setWidth(el.clientWidth);
+      // offsetWidth 是布局尺寸，不含 motion 的 transform 缩放
+      const card = el.querySelector<HTMLElement>('.pcard');
+      if (card) setCardW(card.offsetWidth || DEFAULT_CARD_W);
+    };
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [cards.length]);
 
   const n = cards.length;
   const mid = (n - 1) / 2;
-  const spacing = n > 1 ? Math.min(88, Math.max(44, (width - CARD_W - 40) / (n - 1))) : 0;
+  const spacing = n > 1 ? Math.min(88, Math.max(40, (width - cardW - 24) / (n - 1))) : 0;
   const step = Math.min(10, 40 / Math.max(mid, 1));
 
   return (
@@ -78,7 +85,7 @@ export function HandFan({ cards, interactive, selected, playable, onCardClick }:
                   : undefined
               }
               transition={SPRING}
-              style={{ zIndex: i, transformOrigin: 'center 120%' }}
+              style={{ zIndex: i, transformOrigin: 'center 120%', left: '50%', marginLeft: -cardW / 2 }}
             >
               <CardView
                 def={card.def}

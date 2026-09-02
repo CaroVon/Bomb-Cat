@@ -18,6 +18,7 @@ beforeAll(async () => {
   // 快速模式：bot 思考 ~20ms、回合计时兜底 100ms
   GameRoomClass.turnTimeoutMs = 100;
   GameRoomClass.botDelayMs = 20;
+  GameRoomClass.nopeWindowMs = 120;
   server = new Server({});
   server.define('game', GameRoomClass);
   await server.listen(PORT);
@@ -26,6 +27,7 @@ beforeAll(async () => {
 afterAll(async () => {
   GameRoomClass.turnTimeoutMs = 45_000;
   GameRoomClass.botDelayMs = 1500;
+  GameRoomClass.nopeWindowMs = 8000;
   await server.gracefullyShutdown(false);
 });
 

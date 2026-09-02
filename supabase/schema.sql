@@ -11,10 +11,11 @@ create table if not exists public.profiles (
   updated_at timestamptz not null default now()
 );
 
--- 2. 战绩
+-- 2. 战绩（display_name 反范式冗余，用于排行榜聚合展示）
 create table if not exists public.match_history (
   id bigint generated always as identity primary key,
   user_id uuid not null references auth.users(id) on delete cascade,
+  display_name text not null default '',
   deck_name text not null default '经典卡组',
   character_id text not null default 'none',
   place int not null,

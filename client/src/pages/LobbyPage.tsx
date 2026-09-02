@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { autoReconnect, createRoom, joinRoom, quickMatch, snapPhase, useGame } from '../lib/game';
 import { loadIdentity } from '../lib/identity';
+import { fetchLeaderboard, loadCareer, type LeaderRow } from '../lib/stats';
 
 export default function LobbyPage() {
   const navigate = useNavigate();
@@ -161,14 +162,93 @@ export default function LobbyPage() {
       </div>
 
       <div className="panel" style={{ marginTop: 16 }}>
+        <CareerPanel />
+      </div>
+
+      <div className="panel" style={{ marginTop: 16 }}>
         <h3 style={{ marginTop: 0 }}>玩法速览</h3>
         <p className="muted" style={{ fontSize: 13, lineHeight: 2 }}>
           轮到你时可以出任意数量的牌，然后摸一张牌结束回合。牌堆里混着爆炸猫——摸到它而没有拆解，你就出局了！
           <br />
           攻击⚡让对方连走两回合；跳过🚫免摸牌；求赠🎁偷牌；否认❌可以否定别人刚打出的牌（8 秒窗口内）；
-          两张同名普通猫偷随机牌，三张指名偷牌。选个角色，用专属技能整活吧。
+          两张同名普通猫偷随机牌，三张指名偷牌；万能猫🐈‍⬛可通配组合；果奔猫🐱‍💨能把爆炸猫藏进手牌。
+          选个角色，用专属技能整活吧。
         </p>
       </div>
     </div>
+  );
+}
+
+/* ==================== 战绩 / 排行榜 ==================== */
+
+function CareerPanel() {
+  const career = loadCareer();
+  const [board, setBoard] = useState<LeaderRow[] | null | 'loading'>('loading');
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchLeaderboard().then((rows) => {
+      if (!cancelled) setBoard(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const winRate = career.games > 0 ? Math.round((career.wins / career.games) * 100) : 0;
+
+  return (
+    <>
+      <h3 style={{ marginTop: 0, marginBottom: 10 }}>📊 我的战绩</h3>
+      <div className="h-row" style={{ gap: 22 }}>
+        <span>
+          <strong style={{ fontSize: 22, color: 'var(--gold)' }}>{career.points}</strong>
+          <span className="muted" style={{ fontSize: 12 }}> 积分</span>
+        </span>
+        <span>
+          <strong style={{ fontSize: 22 }}>{career.games}</strong>
+          <span className="muted" style={{ fontSize: 12 }}> 局</span>
+        </span>
+        <span>
+          <strong style={{ fontSize: 22 }}>{career.wins}</strong>
+          <span className="muted" style={{ fontSize: 12 }}> 胜（{winRate}%）</span>
+        </span>
+        {Object.entries(career.places)
+          .sort((a, b) => Number(a[0]) - Number(b[0]))
+          .map(([place, n]) => (
+            <span key={place} className="tag">
+              第 {place} 名 ×{n}
+            </span>
+          ))}
+      </div>
+
+      <h3 style={{ margin: '16px 0 8px' }}>🏆 排行榜{board === null ? '（未连接云端）' : ''}</h3>
+      {board === 'loading' && <p className="muted" style={{ fontSize: 13 }}>加载中……</p>}
+      {board === null && (
+        <p className="muted" style={{ fontSize: 13 }}>
+          配置 Supabase 后可与朋友共享云端排行（见 supabase/README.md）；当前仅本地统计。
+        </p>
+      )}
+      {Array.isArray(board) && board.length === 0 && (
+        <p className="muted" style={{ fontSize: 13 }}>还没有云端对局记录，先来一局？</p>
+      )}
+      {Array.isArray(board) && board.length > 0 && (
+        <div style={{ lineHeight: 2 }}>
+          {board.map((row, i) => (
+            <div key={row.name + i} className="h-row" style={{ justifyContent: 'space-between', maxWidth: 420 }}>
+              <span>
+                <span className="muted" style={{ width: 22, display: 'inline-block' }}>
+                  {i + 1}.
+                </span>
+                {row.name}
+              </span>
+              <span className="muted" style={{ fontSize: 12 }}>
+                {row.wins} 胜 / {row.games} 局 · <strong style={{ color: 'var(--gold)' }}>{row.points} 分</strong>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }

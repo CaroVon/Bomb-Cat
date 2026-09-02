@@ -20,6 +20,7 @@ import { activeSkinMap } from '../lib/skins';
 import { animMs, getSettings, setSetting } from '../lib/settings';
 import { sfx } from '../lib/sound';
 import { explodeAt, winCelebration } from '../lib/fx';
+import { recordMatch } from '../lib/stats';
 import { CardView, setSkinMap } from '../components/CardView';
 import Modal from '../components/Modal';
 import { Seat, type SeatData } from '../components/table/Seat';
@@ -201,14 +202,25 @@ export default function GamePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game.toast?.id]);
 
-  // 胜利庆祝（只放一次）
+  // 胜利庆祝（只放一次）+ 战绩记录
   const gameEnded = !!game.gameEnd;
   useEffect(() => {
     if (gameEnded && !celebratedRef.current) {
       celebratedRef.current = true;
       sfx('win');
       winCelebration();
+      const end = game.gameEnd;
+      const mine = end?.ranking.find((r) => r.sessionId === myId);
+      if (end && mine) {
+        void recordMatch({
+          place: mine.place,
+          playerCount: end.ranking.length,
+          deckName: state?.deckName ?? '经典卡组',
+          characterId: me?.characterId ?? 'none',
+        });
+      }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameEnded]);
 
   const [banner, setBanner] = useState<{ text: string; gold: boolean } | null>(null);

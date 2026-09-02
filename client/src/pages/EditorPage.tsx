@@ -400,6 +400,16 @@ function DeckSection() {
               />
             </div>
 
+            <div className="h-row" style={{ marginBottom: 12 }}>
+              <span className="muted" style={{ fontSize: 13 }}>扩展包：</span>
+              <button onClick={() => addExpansion('imploding')} title="反转/改变未来/摸牌底/万能猫">
+                + 内爆扩展
+              </button>
+              <button onClick={() => addExpansion('streaking')} title="果奔猫：藏猫诈唬">
+                + 果奔扩展
+              </button>
+            </div>
+
             <h4>内置卡数量</h4>
             <div
               style={{
