@@ -128,6 +128,51 @@ export const BUILTIN_CARDS: CardDef[] = [
     comboable: true,
     color: '#f59e0b',
   },
+  /* ============ 内爆扩展（Imploding，社区口碑第一扩展的核心卡） ============ */
+  {
+    id: 'reverse',
+    name: '反转',
+    kind: 'action',
+    emoji: '↩️',
+    description: '立即反转出牌顺序，然后继续你的回合。',
+    effects: [{ type: 'reverse' }],
+  },
+  {
+    id: 'alter-future',
+    name: '改变未来',
+    kind: 'action',
+    emoji: '🔭',
+    description: '查看牌堆顶 3 张并重新排列它们的顺序，然后继续你的回合。',
+    effects: [{ type: 'alterFuture' }],
+  },
+  {
+    id: 'draw-bottom',
+    name: '摸牌底',
+    kind: 'action',
+    emoji: '🕳️',
+    description: '结束你的回合，但从牌堆底而不是顶摸牌。',
+    effects: [{ type: 'drawFromBottom' }],
+  },
+  {
+    id: 'feral',
+    name: '万能猫',
+    kind: 'plain',
+    emoji: '🐈‍⬛',
+    description: '万能普通猫：可与任意其他普通猫组成对子（偷随机牌）或三连（指名偷牌）。',
+    effects: [],
+    comboable: true,
+    feral: true,
+    color: '#71717a',
+  },
+  /* ============ 果奔扩展（Streaking，口碑第二：藏猫诈唬） ============ */
+  {
+    id: 'streaking',
+    name: '果奔猫',
+    kind: 'streaking',
+    emoji: '🐱‍💨',
+    description: '被动：摸到爆炸猫时可以秘密藏进手牌而不爆炸。持有爆炸猫期间无法获胜；再摸到一张会当场爆炸！',
+    effects: [],
+  },
 ];
 
 export const BUILTIN_CARD_MAP: ReadonlyMap<string, CardDef> = new Map(

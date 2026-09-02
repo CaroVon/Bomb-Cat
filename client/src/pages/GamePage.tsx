@@ -258,20 +258,27 @@ export default function GamePage() {
     : 0;
 
   const selectedCards = myHand.filter((c) => selected.includes(c.instanceId));
+  /** 有效组合：全部为可组普通猫，且（同名 或 含万能猫通配） */
   const selectedSamePlain =
     selectedCards.length >= 2 &&
     selectedCards.every((c) => c.def.kind === 'plain' && c.def.comboable) &&
-    new Set(selectedCards.map((c) => c.def.id)).size === 1;
+    (new Set(selectedCards.map((c) => c.def.id)).size === 1 ||
+      selectedCards.some((c) => c.def.feral));
 
   const playable = useMemo(() => {
     const set = new Set<string>();
     if (!canAct) return set;
     const counts = new Map<string, number>();
     myHand.forEach((c) => counts.set(c.def.id, (counts.get(c.def.id) ?? 0) + 1));
+    const plains = myHand.filter((c) => c.def.kind === 'plain' && c.def.comboable);
+    const hasFeral = plains.some((c) => c.def.feral);
     myHand.forEach((c) => {
-      if (c.def.kind === 'defuse' || c.def.id === 'nope') return;
+      if (c.def.kind === 'defuse' || c.def.id === 'nope' || c.def.kind === 'streaking') return;
       if (c.def.kind === 'plain') {
-        if ((counts.get(c.def.id) ?? 0) >= 2) set.add(c.instanceId);
+        // 同名 >=2，或有万能猫且场上普通猫 >=2
+        if ((counts.get(c.def.id) ?? 0) >= 2 || (hasFeral && plains.length >= 2)) {
+          set.add(c.instanceId);
+        }
       } else {
         set.add(c.instanceId);
       }

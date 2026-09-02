@@ -123,6 +123,9 @@ function attach(room: Room<any>): void {
   room.onMessage('error', (msg: ServerMessage) => {
     if (msg.action === 'error') showToast(msg.message);
   });
+  room.onMessage('notice', (msg: ServerMessage & { text: string }) => {
+    if (msg.action === 'notice') showToast(msg.text);
+  });
   room.onMessage('peekDeck', (msg: ServerMessage & { cards: CardDef[] }) => {
     if (msg.action === 'peekDeck') {
       snap.peek = { id: ++modalSeq, cards: msg.cards };

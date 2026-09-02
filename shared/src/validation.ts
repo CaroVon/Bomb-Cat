@@ -43,10 +43,13 @@ export function validateCustomCard(card: CardDef, errors: string[]): boolean {
   if (typeof card.description !== 'string' || card.description.length > 120) {
     err(`${card.id}: 描述为空或超过 120 字`);
   }
-  if (card.kind === 'exploding' || card.kind === 'defuse') {
-    err(`${card.id}: 自定义卡不能是爆炸猫或拆解`);
+  if (card.kind === 'exploding' || card.kind === 'defuse' || card.kind === 'streaking') {
+    err(`${card.id}: 自定义卡不能是爆炸猫、拆解或果奔猫`);
   } else if (card.kind !== 'action' && card.kind !== 'plain') {
     err(`${card.id}: 卡牌类型必须是 action 或 plain`);
+  }
+  if (card.feral && card.kind !== 'plain') {
+    err(`${card.id}: 只有普通猫可以标记为万能（feral）`);
   }
   if (!Array.isArray(card.effects)) {
     err(`${card.id}: effects 必须是数组`);

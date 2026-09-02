@@ -18,6 +18,7 @@ import {
   setActiveSkinPack,
 } from '../lib/skins';
 import { deleteDeck, loadDecks, saveDeck } from '../lib/decks';
+import { decodeDeck, encodeDeck } from '../lib/share';
 import { CardView, setSkinMap } from '../components/CardView';
 import Modal from '../components/Modal';
 
@@ -32,7 +33,7 @@ const EFFECT_LABEL: Record<string, string> = {
   stealNamed: '指名偷牌（需目标）',
   peekHand: '偷看手牌（需目标）',
   swapHand: '交换手牌（需目标）',
-  drawFromBottom: '从牌堆底摸 1 张',
+  drawFromBottom: '结束回合，改从牌堆底摸牌',
   reverse: '反转出牌方向',
   selfDraw: '额外摸牌',
 };
@@ -236,6 +237,9 @@ function DeckSection() {
   const [draft, setDraft] = useState<DeckDef | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [newCard, setNewCard] = useState<CardDef | null>(null);
+  const [importCode, setImportCode] = useState('');
+  const [importMsg, setImportMsg] = useState('');
+  const [shareCode, setShareCode] = useState<string | null>(null);
 
   const draftCards = useMemo(() => {
     if (!draft) return [];
@@ -263,6 +267,34 @@ function DeckSection() {
     setDraft({ ...d, counts });
   }
 
+  /** 一键加入扩展包（在经典基础上叠加强度适中的扩展卡） */
+  function addExpansion(kind: 'imploding' | 'streaking'): void {
+    const base = draft ?? { ...CLASSIC_DECK, id: '', name: '我的卡组' };
+    const counts = { ...base.counts };
+    if (kind === 'imploding') {
+      counts.reverse = (counts.reverse ?? 0) + 3;
+      counts['alter-future'] = (counts['alter-future'] ?? 0) + 3;
+      counts['draw-bottom'] = (counts['draw-bottom'] ?? 0) + 3;
+      counts.feral = (counts.feral ?? 0) + 5;
+    } else {
+      counts.streaking = (counts.streaking ?? 0) + 1;
+    }
+    setErrors([]);
+    setDraft({ ...base, counts });
+  }
+
+  function doImport(): void {
+    const r = decodeDeck(importCode);
+    if (!r.ok || !r.deck) {
+      setImportMsg(r.error ?? '导入失败');
+      return;
+    }
+    void saveDeck(r.deck);
+    setDecks(loadDecks());
+    setImportCode('');
+    setImportMsg(`已导入「${r.deck.name}」`);
+  }
+
   return (
     <div className="panel">
       <div className="h-row" style={{ marginBottom: 12 }}>
@@ -276,7 +308,24 @@ function DeckSection() {
         >
           基于经典卡组新建
         </button>
+        <button onClick={() => addExpansion('imploding')} title="反转/改变未来/摸牌底/万能猫">
+          + 内爆扩展
+        </button>
+        <button onClick={() => addExpansion('streaking')} title="果奔猫：藏猫诈唬">
+          + 果奔扩展
+        </button>
+        <span style={{ flex: 1 }} />
+        <input
+          value={importCode}
+          onChange={(e) => setImportCode(e.target.value)}
+          placeholder="粘贴卡组分享码 BM1.…"
+          style={{ width: 220, fontSize: 12 }}
+        />
+        <button onClick={doImport} disabled={!importCode.trim()}>
+          导入
+        </button>
       </div>
+      {importMsg && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{importMsg}</div>}
 
       <div className="h-row">
         <div className="char-card" style={{ minWidth: 180 }}>
@@ -299,6 +348,13 @@ function DeckSection() {
                 }}
               >
                 编辑
+              </button>
+              <button
+                style={{ padding: '6px 12px', fontSize: 13 }}
+                onClick={() => setShareCode(encodeDeck(d))}
+                title="生成分享码，发给朋友即可导入"
+              >
+                分享
               </button>
               <button
                 style={{ padding: '6px 12px', fontSize: 13 }}
@@ -566,6 +622,37 @@ function DeckSection() {
             </div>
           </>
         )}
+      </Modal>
+
+      {/* 卡组分享码 */}
+      <Modal
+        open={!!shareCode}
+        title="卡组分享码"
+        onClose={() => setShareCode(null)}
+        footer={
+          <>
+            <button
+              className="primary"
+              onClick={() => {
+                if (shareCode) void navigator.clipboard?.writeText(shareCode);
+                setShareCode(null);
+              }}
+            >
+              复制并关闭
+            </button>
+            <button onClick={() => setShareCode(null)}>关闭</button>
+          </>
+        }
+      >
+        <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+          把这串码发给朋友，TA 在定制工坊顶部粘贴导入即可使用你设计的卡组
+        </p>
+        <textarea
+          readOnly
+          value={shareCode ?? ''}
+          onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+          style={{ width: '100%', height: 90, fontSize: 11, wordBreak: 'break-all' }}
+        />
       </Modal>
     </div>
   );

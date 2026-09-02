@@ -72,8 +72,11 @@ describe('日志同步', () => {
     const firstId = host.room.state.turnOrder[host.room.state.turnIndex] as string;
     const first = firstId === host.room.sessionId ? host : guest;
 
-    // 打一张有 effects 的牌
-    const playable = first.hand.find((c) => c.def.effects.length > 0);
+    // 打一张不需要目标的牌（skip/attack/shuffle/peek）
+    const noTargetTypes = ['skip', 'attack', 'shuffle', 'peek'];
+    const playable = first.hand.find(
+      (c) => c.def.effects.length > 0 && noTargetTypes.includes(c.def.effects[0]!.type),
+    );
     expect(playable).toBeTruthy();
     first.room.send('act', { action: 'playCard', instanceId: playable!.instanceId });
     await wait(600);

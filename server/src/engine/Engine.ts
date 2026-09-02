@@ -62,8 +62,10 @@ export class GameEngine {
 
   /** 效果队列（跨挂起状态续跑） */
   private queue: { play: PendingPlay; effects: CardEffect[]; index: number } | null = null;
-  /** 队列跑完后是否结束回合（skip/attack 类效果） */
+  /** 队列跑完后是否结束回合（skip/attack/drawFromBottom 类效果） */
   private endTurnAfterEffects = false;
+  /** 结束回合时的摸牌来源（摸牌底语义） */
+  private pendingEndDraw: 'bottom' | null = null;
   /** 本轮出牌携带的攻击（targeted=指定目标，null=沿方向下一位） */
   private pendingAttack: { targeted: string | null } | null = null;
 
@@ -314,17 +316,28 @@ export class GameEngine {
       const comboInstances: CardInstance[] = [];
       for (const id of comboIds) {
         const c = player.hand.find(
-          (x) => x.iid === id && x.cardId === instance.cardId && x.iid !== instance.iid,
+          (x) => x.iid === id && x.iid !== instance.iid,
         );
-        if (!c) return this.invalid(sessionId, '组合牌必须是手中同名的普通猫');
+        if (!c) return this.invalid(sessionId, '组合牌必须是手中存在的牌');
+        const cdef = this.cardMap.get(c.cardId);
+        if (!cdef || cdef.kind !== 'plain' || !cdef.comboable) {
+          return this.invalid(sessionId, '组合牌必须是普通猫');
+        }
         comboInstances.push(c);
       }
       const total = comboInstances.length + 1;
       if (total !== 2 && total !== 3) {
-        return this.invalid(sessionId, '组合只能是 2 张或 3 张同名普通猫');
+        return this.invalid(sessionId, '组合只能是 2 张或 3 张');
+      }
+      // 同名成组；或组内含万能猫（feral）时允许任意普通猫混搭
+      const group = [instance, ...comboInstances];
+      const ids = new Set(group.map((c) => c.cardId));
+      const hasFeral = group.some((c) => this.cardMap.get(c.cardId)?.feral);
+      if (ids.size > 1 && !hasFeral) {
+        return this.invalid(sessionId, '组合必须是同名普通猫（万能猫可通配）');
       }
       combo = total === 2 ? 'pair' : 'triple';
-      instances = [instance, ...comboInstances];
+      instances = group;
       if (total === 3) {
         if (!wantCardId || !this.cardMap.has(wantCardId)) {
           return this.invalid(sessionId, '三张组合需要指定要偷的牌');
@@ -335,6 +348,8 @@ export class GameEngine {
       }
     } else if (def.kind === 'plain') {
       return this.invalid(sessionId, '普通猫只能 2 张或 3 张组合打出');
+    } else if (def.kind === 'streaking') {
+      return this.invalid(sessionId, '果奔猫是被动牌，不能主动打出');
     } else {
       effects = def.effects;
     }
@@ -452,8 +467,15 @@ export class GameEngine {
     this.discard.push(...pending.instances);
     this.queue = { play: pending, effects: pending.effects, index: 0 };
     this.endTurnAfterEffects = pending.effects.some(
-      (e) => e.type === 'skip' || e.type === 'attack' || e.type === 'targetedAttack',
+      (e) =>
+        e.type === 'skip' ||
+        e.type === 'attack' ||
+        e.type === 'targetedAttack' ||
+        e.type === 'drawFromBottom',
     );
+    this.pendingEndDraw = pending.effects.some((e) => e.type === 'drawFromBottom')
+      ? 'bottom'
+      : null;
     if (pending.effects.some((e) => e.type === 'targetedAttack')) {
       this.pendingAttack = { targeted: pending.targetSessionId ?? null };
     } else if (pending.effects.some((e) => e.type === 'attack')) {
@@ -613,14 +635,7 @@ export class GameEngine {
       }
 
       case 'drawFromBottom': {
-        const c = this.deck.shift();
-        if (!c) return 'ok';
-        if (c.cardId === 'exploding') {
-          return this.handleExplosion(player, c, events);
-        }
-        player.hand.push(c);
-        this.ev(events, { type: 'hand', sessionId: player.sessionId });
-        this.log(events, `${player.name} 从牌堆底摸了 1 张牌`);
+        // 结束回合并从牌堆底摸牌（结算挪到 finishTurn，保证爆炸/藏猫流程一致）
         return 'ok';
       }
 
@@ -671,8 +686,10 @@ export class GameEngine {
     if (!c) return this.invalid(sessionId, '牌堆空了');
 
     if (c.cardId === 'exploding') {
-      this.handleExplosion(player, c, events);
-      return events;
+      const r = this.handleExplosion(player, c, events);
+      // 拆解挂起 / 已阵亡（内部已推进回合）；藏猫 → 照常结束回合
+      if (r === 'suspend-defuse' || !player.alive) return events;
+      return this.finishTurn(events);
     }
     player.hand.push(c);
     this.ev(events, { type: 'hand', sessionId });
@@ -701,6 +718,24 @@ export class GameEngine {
       });
       this.ev(events, { type: 'awaitingDefuse' });
       return 'suspend-defuse';
+    }
+
+    // 果奔猫：秘密藏起一张爆炸猫（手里已藏一张时再摸会当场爆炸）
+    const holdsExploding = player.hand.some((c) => c.cardId === 'exploding');
+    const hasStreaking = player.hand.some((c) => c.cardId === 'streaking');
+    if (hasStreaking && !holdsExploding) {
+      player.hand.push(kitten);
+      this.ev(events, { type: 'hand', sessionId: player.sessionId });
+      this.log(events, `${player.name} 摸了一张牌`); // 公开日志不泄露信息
+      this.ev(events, {
+        type: 'private',
+        sessionId: player.sessionId,
+        message: {
+          action: 'notice',
+          text: '🐱‍💨 果奔猫生效：爆炸猫已秘密藏进你的手牌！持有期间无法获胜，再摸到一张会当场爆炸。',
+        },
+      });
+      return 'ok';
     }
 
     player.alive = false;
@@ -783,6 +818,25 @@ export class GameEngine {
     if (this.phase !== 'playing') return events;
 
     const current = this.current();
+
+    // 摸牌底：结束回合前从牌堆底摸一张（走统一的爆炸/藏猫结算）
+    if (this.pendingEndDraw && current?.alive) {
+      this.pendingEndDraw = null;
+      const c = this.deck.shift();
+      if (c) {
+        if (c.cardId === 'exploding') {
+          const r = this.handleExplosion(current, c, events);
+          if (r === 'suspend-defuse' || !current.alive) return events;
+          // streaking 藏猫 → 照常推进回合
+        } else {
+          current.hand.push(c);
+          this.ev(events, { type: 'hand', sessionId: current.sessionId });
+          this.log(events, `${current.name} 从牌堆底摸了一张牌`);
+        }
+      }
+    }
+    this.pendingEndDraw = null;
+
     let transfer = 0;
     if (current) {
       current.turnsLeft--;
@@ -854,17 +908,41 @@ export class GameEngine {
   }
 
   private checkWin(events: EngineEvent[]): boolean {
+    if (this.phase !== 'playing') return false;
     const alive = this.players.filter((p) => p.alive);
-    if (alive.length <= 1 && this.phase === 'playing') {
-      this.phase = 'finished';
-      this.subPhase = 'awaiting-action';
-      const winner = alive[0];
-      this.winnerSessionId = winner?.sessionId ?? '';
-      if (winner) this.log(events, `🏆 ${winner.name} 获得胜利！`);
-      this.ev(events, { type: 'gameEnd', winnerSessionId: this.winnerSessionId });
-      return true;
+    const holdsHidden = (p: EnginePlayer) =>
+      p.hand.some((c) => c.cardId === 'exploding');
+
+    if (alive.length === 0) {
+      // 全灭（极罕见）：最后阵亡者为赢家
+      const last = this.deathOrder[this.deathOrder.length - 1];
+      return this.finishGame(last, events);
     }
+
+    if (alive.length === 1) {
+      const only = alive[0]!;
+      // 果奔猫规则：藏有爆炸猫的独存者判负，胜者是最后阵亡者
+      if (holdsHidden(only)) {
+        const lastDead = this.deathOrder[this.deathOrder.length - 1];
+        if (lastDead && lastDead !== only.sessionId) {
+          return this.finishGame(lastDead, events);
+        }
+      }
+      return this.finishGame(only.sessionId, events);
+    }
+
+    // 2+ 人存活：不提前结束（藏猫者仍在场，游戏继续）
     return false;
+  }
+
+  private finishGame(winnerSessionId: string | undefined, events: EngineEvent[]): boolean {
+    this.phase = 'finished';
+    this.subPhase = 'awaiting-action';
+    this.winnerSessionId = winnerSessionId ?? '';
+    const winner = this.players.find((p) => p.sessionId === this.winnerSessionId);
+    if (winner) this.log(events, `🏆 ${winner.name} 获得胜利！`);
+    this.ev(events, { type: 'gameEnd', winnerSessionId: this.winnerSessionId });
+    return true;
   }
 
   /* ------------------------------------------------------------------ */

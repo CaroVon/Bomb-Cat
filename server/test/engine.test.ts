@@ -475,3 +475,149 @@ describe('自定义卡组', () => {
     expect(e.phase).toBe('lobby');
   });
 });
+
+describe('内爆扩展：万能猫 feral', () => {
+  it('万能猫可与任意普通猫组对子', () => {
+    const e = setup();
+    start(e);
+    const cur = e.current()!;
+    e.players.forEach((p) => (p.hand = p.hand.filter((c) => c.cardId !== 'nope')));
+    const target = e.players.find((p) => p.alive && p.sessionId !== cur.sessionId)!;
+    const targetHand = target.hand.length;
+
+    cur.hand.push(
+      { iid: 'f1', cardId: 'feral' },
+      { iid: 'm1', cardId: 'plain-melon' },
+    );
+    const ev = e.playCard(cur.sessionId, {
+      instanceId: 'f1',
+      comboInstanceIds: ['m1'],
+      targetSessionId: target.sessionId,
+    });
+    expect(ev.some((x) => x.type === 'invalid')).toBe(false);
+    expect(target.hand).toHaveLength(targetHand - 1);
+    expect(e.discard.some((c) => c.iid === 'f1')).toBe(true);
+  });
+
+  it('无万能猫时不同名普通猫不能组合', () => {
+    const e = setup();
+    start(e);
+    const cur = e.current()!;
+    const target = e.players.find((p) => p.alive && p.sessionId !== cur.sessionId)!;
+    cur.hand.push(
+      { iid: 'x1', cardId: 'plain-melon' },
+      { iid: 'x2', cardId: 'plain-potato' },
+    );
+    const ev = e.playCard(cur.sessionId, {
+      instanceId: 'x1',
+      comboInstanceIds: ['x2'],
+      targetSessionId: target.sessionId,
+    });
+    expect(ev.some((x) => x.type === 'invalid')).toBe(true);
+  });
+
+  it('果奔猫不能主动打出', () => {
+    const e = setup();
+    start(e);
+    const cur = e.current()!;
+    cur.hand.push({ iid: 's1', cardId: 'streaking' });
+    const ev = e.playCard(cur.sessionId, { instanceId: 's1' });
+    expect(ev.some((x) => x.type === 'invalid')).toBe(true);
+  });
+});
+
+describe('果奔扩展：藏猫', () => {
+  /** 给其他玩家补拆解，避免等待循环中的随机死亡干扰测试 */
+  function beefUpOthers(e: GameEngine, exceptId: string): void {
+    e.players.forEach((p) => {
+      if (p.sessionId !== exceptId && p.alive) {
+        for (let i = 0; i < 3; i++) p.hand.push({ iid: `test-defuse-${p.sessionId}-${i}`, cardId: 'defuse' });
+      }
+    });
+  }
+
+  function waitForTurn(e: GameEngine, sessionId: string): void {
+    let guard = 0;
+    while (e.current()!.sessionId !== sessionId && guard++ < 60) {
+      e.drawCard(e.current()!.sessionId);
+      if (e.subPhase === 'awaiting-defuse') e.defusePosition(e.pendingDefuse!.sessionId, 3);
+    }
+  }
+
+  it('无拆解但有果奔猫：爆炸猫秘密进手牌，回合正常推进', () => {
+    const e = setup();
+    start(e);
+    const cur = e.current()!;
+    beefUpOthers(e, cur.sessionId);
+    waitForTurn(e, cur.sessionId);
+    cur.hand.push({ iid: 'sk1', cardId: 'streaking' });
+    cur.hand = cur.hand.filter((c) => c.cardId !== 'defuse');
+    forceTop(e, 'exploding');
+    const ev = e.drawCard(cur.sessionId);
+    expect(cur.alive).toBe(true);
+    expect(cur.hand.some((c) => c.cardId === 'exploding')).toBe(true);
+    // 私密通知发出、公开日志不泄露
+    const notice = ev.find((x) => x.type === 'private') as any;
+    expect(notice?.message.action).toBe('notice');
+    expect(ev.some((x) => x.type === 'log' && String((x as any).text).includes('爆炸'))).toBe(false);
+    // 回合已推进（不再是 cur）
+    expect(e.current()?.sessionId).not.toBe(cur.sessionId);
+  });
+
+  it('藏猫状态下再摸爆炸猫：当场爆炸', () => {
+    const e = setup();
+    start(e);
+    const cur = e.current()!;
+    beefUpOthers(e, cur.sessionId);
+    waitForTurn(e, cur.sessionId);
+    cur.hand.push({ iid: 'sk2', cardId: 'streaking' });
+    cur.hand = cur.hand.filter((c) => c.cardId !== 'defuse');
+    forceTop(e, 'exploding');
+    e.drawCard(cur.sessionId); // 藏第一张
+    expect(cur.alive).toBe(true);
+
+    waitForTurn(e, cur.sessionId);
+    forceTop(e, 'exploding');
+    e.drawCard(cur.sessionId); // 第二张 → 爆炸
+    expect(cur.alive).toBe(false);
+  });
+
+  it('最后存活但藏有爆炸猫：判负，最后阵亡者获胜', () => {
+    const e = setup();
+    start(e);
+    const a = e.players.find((p) => p.sessionId === 's:A')!;
+    beefUpOthers(e, 's:A');
+    waitForTurn(e, 's:A');
+    a.hand.push({ iid: 'sk3', cardId: 'streaking' });
+    a.hand = a.hand.filter((c) => c.cardId !== 'defuse');
+    forceTop(e, 'exploding');
+    e.drawCard('s:A');
+    expect(a.hand.some((c) => c.cardId === 'exploding')).toBe(true);
+
+    // 用掉线判死构造终局（确定性）
+    e.killDisconnected('s:C');
+    expect(e.phase).toBe('playing');
+    e.killDisconnected('s:B');
+    expect(e.phase).toBe('finished');
+    expect(e.winnerSessionId).toBe('s:B'); // A 藏猫判负 → B 胜
+  });
+});
+
+describe('摸牌底：结束回合并从牌底摸牌', () => {
+  it('打出摸牌底 → 回合结束且从牌堆底摸一张', () => {
+    const e = setup();
+    start(e);
+    const cur = e.current()!;
+    e.players.forEach((p) => (p.hand = p.hand.filter((c) => c.cardId !== 'nope')));
+    cur.hand.push({ iid: 'db1', cardId: 'draw-bottom' });
+    const handBefore = cur.hand.length;
+    const bottomCard = e.deck[0]!; // 牌堆底（数组开头）
+    const nextId = e.turnOrder[(e.turnIndex + 1) % e.turnOrder.length];
+
+    e.playCard(cur.sessionId, { instanceId: 'db1' });
+    expect(cur.hand).toHaveLength(handBefore); // -1 出牌 +1 摸牌
+    expect(cur.hand.some((c) => c.iid === bottomCard.iid)).toBe(true);
+    expect(e.deck[0]?.iid).not.toBe(bottomCard.iid);
+    expect(e.current()?.sessionId).toBe(nextId);
+  });
+});

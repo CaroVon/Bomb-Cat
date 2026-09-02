@@ -55,7 +55,7 @@ export interface CardEffect {
 
 /* ============================== 卡牌 ============================== */
 
-export type CardKind = 'exploding' | 'defuse' | 'action' | 'plain';
+export type CardKind = 'exploding' | 'defuse' | 'action' | 'plain' | 'streaking';
 
 export interface CardDef {
   /** 唯一 id；内置卡为短名，自定义卡必须带 "custom:" 前缀 */
@@ -68,6 +68,8 @@ export interface CardDef {
   effects: CardEffect[];
   /** plain 卡默认可作为对子/三张组合打出 */
   comboable?: boolean;
+  /** 万能猫：可与任意 plain 卡组合成对子/三连（feral 规则） */
+  feral?: boolean;
   /** 前端主题色（可选） */
   color?: string;
 }
@@ -209,6 +211,7 @@ export type ServerMessage =
   | { action: 'alterPrompt'; cards: CardDef[] } // 请重排这 3 张
   | { action: 'promptDefuse'; deckCount: number } // 请选择爆炸猫放回位置
   | { action: 'error'; message: string }
+  | { action: 'notice'; text: string } // 私密提示（如藏猫通知，不进公开日志语义）
   | {
       action: 'gameEnd';
       winnerName: string;
