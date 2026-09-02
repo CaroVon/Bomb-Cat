@@ -180,13 +180,33 @@ function attach(room: Room<any>): void {
   });
 }
 
-export async function createRoom(name: string): Promise<void> {
+export async function createRoom(
+  name: string,
+  options?: { bots?: number },
+): Promise<void> {
   snap.status = 'connecting';
   snap.error = null;
   emit();
   try {
     const client = new Client(GAME_SERVER_URL);
-    const room = await client.create('game', await joinOptions(name));
+    const room = await client.create('game', { ...(await joinOptions(name)), ...options });
+    attach(room);
+  } catch (e) {
+    snap.status = 'error';
+    snap.error = e instanceof Error ? e.message : String(e);
+    emit();
+    throw e;
+  }
+}
+
+/** 快速匹配：优先并入进行中的快速房，否则新建（15s 凑不满补 AI） */
+export async function quickMatch(name: string): Promise<void> {
+  snap.status = 'connecting';
+  snap.error = null;
+  emit();
+  try {
+    const client = new Client(GAME_SERVER_URL);
+    const room = await client.joinOrCreate('game', { ...(await joinOptions(name)), quick: true });
     attach(room);
   } catch (e) {
     snap.status = 'error';

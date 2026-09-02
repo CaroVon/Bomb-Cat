@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { autoReconnect, createRoom, joinRoom, snapPhase, useGame } from '../lib/game';
+import { autoReconnect, createRoom, joinRoom, quickMatch, snapPhase, useGame } from '../lib/game';
 import { loadIdentity } from '../lib/identity';
 
 export default function LobbyPage() {
@@ -70,6 +70,32 @@ export default function LobbyPage() {
     else setError('重连失败，房间可能已解散');
   }
 
+  async function handlePractice() {
+    setBusy(true);
+    setError('');
+    try {
+      await createRoom(identity!.name, { bots: 2 });
+      navigate('/room');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleQuick() {
+    setBusy(true);
+    setError('');
+    try {
+      await quickMatch(identity!.name);
+      navigate('/room');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="page page-lobby">
       <div className="h-row" style={{ marginBottom: 20 }}>
@@ -99,6 +125,21 @@ export default function LobbyPage() {
           <button className="primary" onClick={handleCreate} disabled={busy}>
             创建房间
           </button>
+        </div>
+
+        <div className="panel">
+          <h3 style={{ marginTop: 0 }}>单人 & 匹配</h3>
+          <p className="muted" style={{ fontSize: 13, lineHeight: 1.7 }}>
+            和两个 AI 猫咪即刻开局练手；或匹配其他玩家（15 秒凑不齐自动补 AI）。
+          </p>
+          <div className="h-row">
+            <button onClick={handlePractice} disabled={busy}>
+              🤖 人机练习
+            </button>
+            <button onClick={handleQuick} disabled={busy}>
+              ⚡ 快速匹配
+            </button>
+          </div>
         </div>
 
         <div className="panel">

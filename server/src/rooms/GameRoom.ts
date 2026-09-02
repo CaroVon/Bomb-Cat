@@ -10,6 +10,7 @@ import {
   type ServerMessage,
 } from '@bombcat/shared';
 import { GameEngine } from '../engine/Engine.js';
+import { decide } from '../ai/BotBrain.js';
 import type { EngineEvent } from '../engine/types.js';
 import type { VerifiedUser } from '../auth.js';
 import { GameState, PlayerState } from '../schema/state.js';
@@ -40,6 +41,8 @@ const EMOTE_ALLOWLIST = ['😂', '😭', '😱', '😡', '👍', '👎', '❤️
 export class GameRoom extends Room<{ state: GameState }> {
   /** 回合计时毫秒数（测试可覆盖） */
   static turnTimeoutMs = TURN_TIMEOUT_MS;
+  /** 机器人思考间隔毫秒（测试可覆盖） */
+  static botDelayMs = 1500;
 
   maxClients = MAX_PLAYERS;
   patchRate = 50;
@@ -48,12 +51,21 @@ export class GameRoom extends Room<{ state: GameState }> {
   private pendingDeck: DeckDef | null = null;
   private nopeTimer: ReturnType<typeof setTimeout> | null = null;
   private turnTimer: Delayed | null = null;
+  private botTimer: Delayed | null = null;
+  /** 机器人玩家的 sessionId 集合 */
+  private botIds = new Set<string>();
+  /** 机器人通过 peek 获得的牌堆顶记忆（不作弊读牌） */
+  private botKnown: string[] | null = null;
+  /** 房间模式：{ bots: n } 人机练习；{ quick: true } 快速匹配 */
+  private roomMode: { bots?: number; quick?: boolean } = {};
+  private quickStarted = false;
 
-  onCreate(): void {
+  onCreate(options: { bots?: number; quick?: boolean } = {}): void {
     const code = generateRoomCode();
     this.roomId = code;
     this.setState(new GameState());
     this.state.roomCode = code;
+    this.roomMode = options ?? {};
     void this.setPrivate(true); // 只通过房间码加入，不进公开列表
 
     this.onMessage('act', (client: Client, message: ClientMessage) => {
@@ -72,6 +84,22 @@ export class GameRoom extends Room<{ state: GameState }> {
       if (!p) return;
       this.broadcast('emote', { sessionId: client.sessionId, name: p.name, emoji });
     });
+
+    // 人机练习：稍候补 bot 并自动开局
+    if (this.roomMode.bots && this.roomMode.bots > 0) {
+      this.clock.setTimeout(() => {
+        if (this.engine.phase !== 'lobby') return;
+        this.addBots(this.roomMode.bots!);
+        this.autoStart();
+      }, 500);
+    } else if (this.roomMode.quick) {
+      // 快速匹配：15 秒内凑不满 2 人则补 bot 开局
+      this.clock.setTimeout(() => {
+        if (this.engine.phase !== 'lobby') return;
+        if (this.engine.players.length < 2) this.addBots(2);
+        this.autoStart();
+      }, 15_000);
+    }
   }
 
   async onAuth(_client: Client, options: any): Promise<VerifiedUser> {
@@ -92,6 +120,15 @@ export class GameRoom extends Room<{ state: GameState }> {
       this.sendHand(client.sessionId);
     }
     this.sync();
+
+    // 快速匹配：凑够 2 名真人后 3 秒开局
+    if (this.roomMode.quick && !this.quickStarted && this.engine.phase === 'lobby') {
+      const humans = this.engine.players.filter((p) => !this.botIds.has(p.sessionId)).length;
+      if (humans >= 2) {
+        this.quickStarted = true;
+        this.clock.setTimeout(() => this.autoStart(), 3000);
+      }
+    }
   }
 
   onDrop(client: Client): void {
@@ -130,6 +167,7 @@ export class GameRoom extends Room<{ state: GameState }> {
   onDispose(): void {
     if (this.nopeTimer) clearTimeout(this.nopeTimer);
     this.turnTimer?.clear();
+    this.botTimer?.clear();
     activeCodes.delete(this.state.roomCode);
   }
 
@@ -154,6 +192,8 @@ export class GameRoom extends Room<{ state: GameState }> {
       this.turnTimer = null;
       this.autoActOnTimeout();
     }, GameRoom.turnTimeoutMs);
+    // 机器人行动循环（bot 思考间隔 < 回合超时，正常情况下由 bot 先行动）
+    this.armBotLoop();
   }
 
   private autoActOnTimeout(): void {
@@ -181,19 +221,85 @@ export class GameRoom extends Room<{ state: GameState }> {
   }
 
   /* ------------------------------------------------------------------ */
+  /* AI 机器人（规则打分；与真人共用 actAs 入口，不作弊读牌）             */
+  /* ------------------------------------------------------------------ */
+
+  private static BOT_NAMES = ['AI·咪宝', 'AI·橘座', 'AI·雪球', 'AI·大橘', 'AI·煤球'];
+
+  private addBots(n: number): void {
+    for (let i = 0; i < n; i++) {
+      if (this.engine.players.length >= MAX_PLAYERS) break;
+      const name =
+        GameRoom.BOT_NAMES[this.botIds.size % GameRoom.BOT_NAMES.length] ??
+        `AI·${this.botIds.size + 1}`;
+      const sid = `bot:${Date.now().toString(36)}:${i}:${Math.floor(Math.random() * 1e4)}`;
+      this.botIds.add(sid);
+      this.process(this.engine.addPlayer(sid, '', name));
+    }
+    this.sync();
+  }
+
+  private autoStart(): void {
+    if (this.engine.phase !== 'lobby' || this.engine.players.length < 2) return;
+    this.actAs(this.engine.hostSessionId, { action: 'startGame' });
+  }
+
+  private armBotLoop(): void {
+    this.botTimer?.clear();
+    this.botTimer = null;
+    if (this.engine.phase !== 'playing') return;
+    const cur = this.engine.current();
+    if (!cur || !this.botIds.has(cur.sessionId)) return;
+    if (this.engine.subPhase === 'awaiting-nope') return; // 否认窗口与 bot 无关
+    const delay = GameRoom.botDelayMs * (0.7 + Math.random() * 0.6);
+    this.botTimer = this.clock.setTimeout(() => {
+      this.botTimer = null;
+      this.botAct();
+    }, delay);
+  }
+
+  private botAct(): void {
+    const e = this.engine;
+    const cur = e.current();
+    if (!cur || !this.botIds.has(cur.sessionId) || e.phase !== 'playing') return;
+    const decision = decide(e, cur.sessionId, this.botKnown);
+    if (!decision) return;
+    if (decision.kind === 'draw') {
+      this.actAs(cur.sessionId, { action: 'draw' });
+    } else if (decision.kind === 'defuse') {
+      this.actAs(cur.sessionId, { action: 'defusePosition', position: decision.position });
+    } else if (decision.kind === 'alter') {
+      this.actAs(cur.sessionId, { action: 'alterFuture', order: decision.order });
+    } else {
+      const playedCardId = String(decision.instanceId.split('#')[0]);
+      this.actAs(cur.sessionId, {
+        action: 'playCard',
+        instanceId: decision.instanceId,
+        comboInstanceIds: decision.comboInstanceIds,
+        targetSessionId: decision.targetSessionId,
+        wantCardId: decision.wantCardId,
+      });
+      // bot 打出洗牌/攻击/跳过后，记忆中的顶牌已失效或被跳过
+      if (playedCardId === 'shuffle' || playedCardId === 'attack' || playedCardId === 'skip') {
+        this.botKnown = null;
+      }
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
   /* 消息分发                                                            */
   /* ------------------------------------------------------------------ */
 
   private handleAction(client: Client, message: ClientMessage): void {
-    const sid = client.sessionId;
+    this.actAs(client.sessionId, message);
+  }
+
+  /** 统一行动入口（真人消息与机器人共用；错误回给有连接的一方，bot 自动忽略） */
+  private actAs(sid: string, message: ClientMessage): void {
     switch (message.action) {
       case 'startGame': {
         const events = this.engine.startGame(sid, this.pendingDeck);
-        if (events.some((e) => e.type === 'invalid')) {
-          this.process(events);
-        } else {
-          this.process(events);
-        }
+        this.process(events);
         break;
       }
       case 'setCharacter': {
@@ -202,11 +308,11 @@ export class GameRoom extends Room<{ state: GameState }> {
       }
       case 'setDeck': {
         if (sid !== this.engine.hostSessionId) {
-          this.sendError(client, '只有房主能设置卡组');
+          this.sendPrivate(sid, { action: 'error', message: '只有房主能设置卡组' });
           break;
         }
         if (this.engine.phase !== 'lobby') {
-          this.sendError(client, '对局已开始');
+          this.sendPrivate(sid, { action: 'error', message: '对局已开始' });
           break;
         }
         if (message.deck === null) {
@@ -216,7 +322,7 @@ export class GameRoom extends Room<{ state: GameState }> {
         }
         const size = JSON.stringify(message.deck).length;
         if (size > 64 * 1024) {
-          this.sendError(client, '卡组数据过大');
+          this.sendPrivate(sid, { action: 'error', message: '卡组数据过大' });
           break;
         }
         const result = validateDeck(
@@ -224,7 +330,10 @@ export class GameRoom extends Room<{ state: GameState }> {
           Math.max(MIN_PLAYERS, this.engine.players.length),
         );
         if (!result.ok) {
-          this.sendError(client, `卡组不合法：${result.errors.join('；')}`);
+          this.sendPrivate(sid, {
+            action: 'error',
+            message: `卡组不合法：${result.errors.join('；')}`,
+          });
           break;
         }
         this.pendingDeck = message.deck;
@@ -287,6 +396,15 @@ export class GameRoom extends Room<{ state: GameState }> {
           this.sendHand(e.sessionId);
           break;
         case 'private':
+          // bot 的看牌结果转为记忆（不作弊：只记 peek 得到的信息）
+          if (
+            this.botIds.has(e.sessionId) &&
+            (e.message as { action?: string }).action === 'peekDeck'
+          ) {
+            this.botKnown = (e.message as { cards?: { id: string }[] }).cards?.map(
+              (c) => c.id,
+            ) ?? null;
+          }
           this.sendPrivate(e.sessionId, e.message);
           break;
         case 'invalid':
