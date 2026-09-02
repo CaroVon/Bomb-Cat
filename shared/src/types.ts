@@ -160,10 +160,13 @@ export type PlayingSubPhase =
   | 'awaiting-target'; // 等待出牌者选择目标玩家
 
 export const NOPE_WINDOW_MS = 8000;
-export const MAX_PLAYERS = 5;
+export const MAX_PLAYERS = 8;
 export const MIN_PLAYERS = 2;
 export const HAND_SIZE_AT_START = 7; // 含 1 张拆解
-export const DEFUSE_TOTAL = 6;
+/** 拆解总量：≤6 人固定 6 张；更多人时每人保底 1 张 */
+export function defuseTotal(playerCount: number): number {
+  return Math.max(6, playerCount);
+}
 
 /* ============================== 协议消息 ============================== */
 

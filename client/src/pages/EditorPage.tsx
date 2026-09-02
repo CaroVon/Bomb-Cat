@@ -202,10 +202,10 @@ function SkinSection() {
                 return (
                   <div key={cardId} style={{ textAlign: 'center' }}>
                     <div
-                      className="card skin"
+                      className="skin-preview"
                       style={{ backgroundImage: `url(${url})` }}
                     >
-                      <span className="card-name">{def?.name}</span>
+                      <span className="pcard-name">{def?.name}</span>
                     </div>
                     <button
                       className="muted"
@@ -391,7 +391,7 @@ function DeckSection() {
             <div className="h-row">
               {draftCards.map((c) => (
                 <div key={c.id} style={{ textAlign: 'center' }}>
-                  <CardView def={c} small />
+                  <CardView def={c} size="mini" />
                   <button
                     className="muted"
                     style={{ fontSize: 11, padding: '2px 8px', background: 'none', border: 'none' }}

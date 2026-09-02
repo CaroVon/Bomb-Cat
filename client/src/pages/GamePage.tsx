@@ -1,18 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AnimatePresence, motion } from 'motion/react';
 import { BUILTIN_CHARACTERS, type CardDef, type HandCard } from '@bombcat/shared';
 import {
   buildCardMap,
   clearAlterPrompt,
-  clearDefusePrompt,
   clearGameEnd,
   clearPeek,
   clearPeekHand,
   eachPlayer,
   leaveRoom,
-  nopeCardIds,
-  nopeNopedBy,
   sendAct,
   stateLog,
   turnOrderList,
@@ -21,22 +17,12 @@ import {
 import { activeSkinMap } from '../lib/skins';
 import { CardView, setSkinMap } from '../components/CardView';
 import Modal from '../components/Modal';
-
-const EFFECT_LABEL: Record<string, string> = {
-  skip: '跳过',
-  attack: '攻击',
-  targetedAttack: '精准攻击',
-  shuffle: '洗牌',
-  peek: '看未来',
-  alterFuture: '改变未来',
-  stealRandom: '偷 1 张随机牌',
-  stealNamed: '指名偷牌',
-  peekHand: '看手牌',
-  swapHand: '交换手牌',
-  drawFromBottom: '从牌底摸牌',
-  reverse: '反转方向',
-  selfDraw: '额外摸牌',
-};
+import { Seat, type SeatData } from '../components/table/Seat';
+import { HandFan, type FanCard } from '../components/table/HandFan';
+import { Stage, type StageShow } from '../components/table/Stage';
+import { DiscardPile, DrawPile } from '../components/table/Piles';
+import { BoomBanner, FlashOverlay, TurnBanner } from '../components/table/Effects';
+import { lastPlayCardIds } from '../lib/game';
 
 function cardNeedsTarget(def: CardDef): boolean {
   return def.effects.some(
@@ -57,12 +43,15 @@ export default function GamePage() {
 
   const [selected, setSelected] = useState<string[]>([]);
   const [targetMode, setTargetMode] = useState<
-    { kind: 'play'; combo: string[]; wantCardId?: string } | { kind: 'skill'; wantCardId?: string } | null
+    | { kind: 'play'; combo: string[]; wantCardId?: string }
+    | { kind: 'skill'; wantCardId?: string }
+    | null
   >(null);
   const [skillOpen, setSkillOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  const pendingPlay = useRef<HandCard | null>(null);
 
   useEffect(() => {
     setSkinMap(activeSkinMap());
@@ -73,16 +62,6 @@ export default function GamePage() {
     return () => clearInterval(t);
   }, []);
 
-  // 拆解/重排弹窗关闭逻辑：
-  // - 拆解完全由 schema 驱动（subPhase + defuseBy），不依赖消息时序
-  // - 重排内容是私密消息（有到达时序），清除加 500ms 防抖避免旧 patch 误杀
-  useEffect(() => {
-    if (state?.subPhase === 'awaiting-alter' && state?.alterBy === myId) return;
-    const t = setTimeout(() => clearAlterPrompt(), 500);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state?.subPhase, state?.alterBy, game.version]);
-
   useEffect(() => {
     if (!room && game.status === 'idle') navigate('/lobby');
   }, [room, game.status, navigate]);
@@ -90,6 +69,109 @@ export default function GamePage() {
   const cardMap = useMemo(() => buildCardMap(state), [game.version, state]);
   const myId = room?.sessionId ?? '';
   const log = useMemo(() => stateLog(state), [game.version, state]);
+
+  /* ---------------- 派生数据（先于使用它们的 effect） ---------------- */
+
+  const players: any[] = useMemo(() => {
+    const list: any[] = [];
+    eachPlayer(state, (p: any) => list.push(p));
+    return list;
+  }, [game.version, state]);
+
+  const currentId = useMemo(
+    () => turnOrderList(state)[state?.turnIndex ?? 0] as string | undefined,
+    [game.version, state],
+  );
+
+  const playersRef = useRef(players);
+  playersRef.current = players;
+  const currentIdRef = useRef(currentId);
+  currentIdRef.current = currentId;
+
+  /* ---------------- 舞台 / 爆炸 / 横幅（可视化状态机） ---------------- */
+
+  const [stage, setStage] = useState<StageShow | null>(null);
+  const seenPlay = useRef(0);
+  useEffect(() => {
+    const at = state?.lastPlayAt ?? 0;
+    if (at && at !== seenPlay.current) {
+      seenPlay.current = at;
+      const defs = lastPlayCardIds(state)
+        .map((id) => cardMap.get(id))
+        .filter(Boolean) as CardDef[];
+      setStage({
+        id: at,
+        byName: state.lastPlayBy ?? '',
+        cards: defs,
+        noped: state.lastPlayNoped ?? false,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.lastPlayAt]);
+
+  // 被否认 → 盖章
+  useEffect(() => {
+    setStage((s) =>
+      s && state?.lastPlayNoped && !s.noped && state?.lastPlayAt === s.id
+        ? { ...s, noped: true }
+        : s,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.lastPlayNoped]);
+
+  const nopeRemaining = Math.max(0, Math.ceil(((state?.nopeEndsAt ?? 0) - now) / 1000));
+
+  // 停留时长与"是否需要他人响应"挂钩（EK2 教训）：否认窗口期持续展示，否则 1.6s
+  useEffect(() => {
+    if (!stage) return;
+    if (state?.nopeActive) return;
+    const t = setTimeout(() => setStage(null), 1600);
+    return () => clearTimeout(t);
+  }, [stage?.id, state?.nopeActive, state?.lastPlayNoped]);
+
+  // 舞台倒计时（否认窗口中）
+  const stageCountdown = state?.nopeActive ? nopeRemaining : undefined;
+  const stageWithCountdown = useMemo(
+    () => (stage ? { ...stage, countdown: stageCountdown } : null),
+    [stage, stageCountdown],
+  );
+
+  const [boom, setBoom] = useState<{ key: number; name: string } | null>(null);
+  const seenDeath = useRef(0);
+  useEffect(() => {
+    const at = state?.lastDeathAt ?? 0;
+    if (at && at !== seenDeath.current) {
+      seenDeath.current = at;
+      setBoom({ key: at, name: state.lastDeathBy ?? '' });
+      const timer = setTimeout(() => setBoom(null), 1500);
+      return () => clearTimeout(timer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.lastDeathAt]);
+
+  const [banner, setBanner] = useState<{ text: string; gold: boolean } | null>(null);
+  const seenTurn = useRef<string | null>(null);
+  useEffect(() => {
+    const cur = currentIdRef.current;
+    if (cur && seenTurn.current !== cur && state?.phase === 'playing') {
+      seenTurn.current = cur;
+      const name = playersRef.current.find((p: any) => p.sessionId === cur)?.name ?? '';
+      setBanner({ text: cur === myId ? '你的回合' : `${name} 的回合`, gold: cur === myId });
+      const t = setTimeout(() => setBanner(null), 1500);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId, state?.phase, myId]);
+
+  // 拆解/重排弹窗关闭逻辑
+  useEffect(() => {
+    if (state?.subPhase === 'awaiting-alter' && state?.alterBy === myId) return;
+    const t = setTimeout(() => clearAlterPrompt(), 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.subPhase, state?.alterBy, game.version]);
+
+  /* ---------------- 派生数据（非 hook 部分） ---------------- */
 
   if (!state || !room) {
     return (
@@ -99,11 +181,8 @@ export default function GamePage() {
     );
   }
 
-  const players: any[] = [];
-  eachPlayer(state, (p: any) => players.push(p));
   const me = players.find((p) => p.sessionId === myId);
   const others = players.filter((p) => p.sessionId !== myId);
-  const currentId = turnOrderList(state)[state.turnIndex];
   const isMyTurn = currentId === myId && state.phase === 'playing';
   const canAct = isMyTurn && state.subPhase === 'awaiting-action' && me?.alive;
 
@@ -120,14 +199,35 @@ export default function GamePage() {
     selectedCards.every((c) => c.def.kind === 'plain' && c.def.comboable) &&
     new Set(selectedCards.map((c) => c.def.id)).size === 1;
 
+  const playable = useMemo(() => {
+    const set = new Set<string>();
+    if (!canAct) return set;
+    const counts = new Map<string, number>();
+    myHand.forEach((c) => counts.set(c.def.id, (counts.get(c.def.id) ?? 0) + 1));
+    myHand.forEach((c) => {
+      if (c.def.kind === 'defuse' || c.def.id === 'nope') return;
+      if (c.def.kind === 'plain') {
+        if ((counts.get(c.def.id) ?? 0) >= 2) set.add(c.instanceId);
+      } else {
+        set.add(c.instanceId);
+      }
+    });
+    return set;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canAct, game.hand, game.version]);
+
+  const myNope = myHand.find((c) => c.def.id === 'nope');
+  const nopedBy = (state.nopeNopedBy?.toArray?.() ?? state.nopeNopedBy ?? []) as string[];
+  const canNope =
+    state.nopeActive && !!myNope && state.nopePlayBy !== myId && nopedBy[nopedBy.length - 1] !== myId && me?.alive;
+
+  const fanCards: FanCard[] = myHand;
+
   /* ---------------- 交互 ---------------- */
 
   function toggleSelect(instanceId: string) {
-    if (!canAct) return;
     setSelected((prev) =>
-      prev.includes(instanceId)
-        ? prev.filter((i) => i !== instanceId)
-        : [...prev, instanceId],
+      prev.includes(instanceId) ? prev.filter((i) => i !== instanceId) : [...prev, instanceId],
     );
   }
 
@@ -149,7 +249,6 @@ export default function GamePage() {
       toggleSelect(card.instanceId);
       return;
     }
-    // 动作卡：需要目标先选目标
     if (cardNeedsTarget(card.def)) {
       setTargetMode({ kind: 'play', combo: [] });
       pendingPlay.current = card;
@@ -158,28 +257,23 @@ export default function GamePage() {
     playSingle(card);
   }
 
-  const pendingPlay = useRef<HandCard | null>(null);
-
   function confirmTarget(targetSessionId: string) {
     const mode = targetMode;
     setTargetMode(null);
     if (!mode) return;
     if (mode.kind === 'play') {
       if (mode.combo.length > 0) {
-        // 组合出牌
-        const combo = mode.combo.slice(1);
         sendAct({
           action: 'playCard',
           instanceId: mode.combo[0]!,
-          comboInstanceIds: combo,
+          comboInstanceIds: mode.combo.slice(1),
           targetSessionId,
           wantCardId: mode.wantCardId,
         });
       } else if (pendingPlay.current) {
-        const card = pendingPlay.current;
         sendAct({
           action: 'playCard',
-          instanceId: card.instanceId,
+          instanceId: pendingPlay.current.instanceId,
           targetSessionId,
         });
       }
@@ -197,185 +291,139 @@ export default function GamePage() {
     }
   }
 
-  const nopeRemaining = Math.max(0, Math.ceil((state.nopeEndsAt - now) / 1000));
-  const myNope = myHand.find((c) => c.def.id === 'nope');
-  const nopedBy = nopeNopedBy(state);
-  const iAmLastNoper = nopedBy[nopedBy.length - 1] === myId;
-  const canNope =
-    state.nopeActive &&
-    !!myNope &&
-    state.nopePlayBy !== myId &&
-    !iAmLastNoper &&
-    me?.alive;
-
-  const discardDef = state.discardTopCardId
-    ? cardMap.get(state.discardTopCardId)
-    : undefined;
-  const nopeCards: CardDef[] = nopeCardIds(state)
-    .map((id) => cardMap.get(id))
-    .filter(Boolean) as CardDef[];
+  const bounceId =
+    stage && Date.now() - (state.lastPlayAt ?? 0) < 1200 ? (state.lastPlayById as string) : '';
 
   /* ---------------- 渲染 ---------------- */
 
   return (
-    <div className="table">
-      {/* 对手席位 */}
-      <div className="seats">
-        {others.map((p) => {
-          const ch = BUILTIN_CHARACTERS.find((c) => c.id === p.characterId);
-          return (
-            <div
-              key={p.sessionId}
-              className={`seat ${p.sessionId === currentId ? 'current' : ''} ${!p.alive ? 'dead' : ''}`}
-            >
-              <span className="avatar">{ch?.emoji ?? '🙂'}</span>
-              <div className="meta">
-                <strong>{p.name}</strong>
-                <span className="muted">
-                  {p.alive ? `🂠 ${p.handCount}` : '💀 出局'}
-                  {p.turnsLeft > 1 ? ` ⚡${p.turnsLeft}` : ''}
-                  {!p.connected ? ' · 掉线' : ''}
-                </span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+    <div className={`table-root ${boom ? 'is-shaking' : ''}`}>
+      <FlashOverlay boomKey={boom?.key ?? 0} />
+      <TurnBanner text={banner?.text ?? null} gold={banner?.gold ?? false} />
+      <BoomBanner name={boom?.name ?? null} />
+
+      {/* 对手席 */}
+      <header className="opponents-row">
+        {others.map((p) => (
+          <Seat
+            key={p.sessionId}
+            seat={p as SeatData}
+            isCurrent={p.sessionId === currentId}
+            bounced={p.sessionId === bounceId}
+            emoji={
+              BUILTIN_CHARACTERS.find((c) => c.id === p.characterId)?.emoji ?? '🙂'
+            }
+          />
+        ))}
+      </header>
 
       {/* 中央牌桌 */}
-      <div className="table-center">
-        <div className="pile">
-          <CardView def={cardMap.get('exploding')} faceDown />
-          <span className="count">牌堆 {state.deckCount}</span>
-        </div>
+      <main className="table-center-v2">
+        <DrawPile count={state.deckCount} />
+        <Stage show={stageWithCountdown} />
+        <DiscardPile
+          topIds={(state.discardTopIds?.toArray?.() ?? state.discardTopIds ?? []) as string[]}
+          total={state.discardCount}
+          cardMap={cardMap}
+        />
+      </main>
 
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 15, marginBottom: 6 }}>
-            {state.phase === 'finished' ? (
-              <span style={{ color: 'var(--accent)' }}>🏆 对局结束</span>
-            ) : isMyTurn ? (
-              <span style={{ color: 'var(--accent-2)' }}>
-                轮到你了{state.subPhase === 'awaiting-defuse' ? ' · 处理爆炸猫' : ''}
-                {state.subPhase === 'awaiting-nope' ? ' · 等待否认' : ''}
-              </span>
-            ) : (
-              <span className="muted">
-                等待 {players.find((p) => p.sessionId === currentId)?.name} 行动
-                {state.subPhase === 'awaiting-nope' ? '（否认窗口中）' : ''}
-              </span>
-            )}
-          </div>
-          <div className="muted" style={{ fontSize: 12 }}>
-            卡组：{state.deckName} · 方向 {state.direction === 1 ? '顺时针 ↻' : '逆时针 ↺'}
-          </div>
-          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-            你：{myChar?.emoji} {myChar?.name ?? '路人'}
-            {me && !me.alive ? ' · 👻 观战中' : ''}
-          </div>
-        </div>
-
-        <div className="pile">
-          <CardView def={discardDef} />
-          <span className="count">弃牌堆 {state.discardCount}</span>
-        </div>
+      {/* 状态条 */}
+      <div className="statusline">
+        <span className={`status-turn ${isMyTurn ? 'is-mine' : ''}`}>
+          {state.phase === 'finished'
+            ? '🏆 对局结束'
+            : isMyTurn
+              ? me?.alive
+                ? '轮到你了'
+                : '观战中'
+              : `等待 ${players.find((p) => p.sessionId === currentId)?.name ?? ''} 行动`}
+        </span>
+        <span className="muted status-deck">{state.deckName}</span>
+        <span className="muted status-dir">
+          {state.direction === 1 ? '↻ 顺时针' : '↺ 逆时针'}
+        </span>
+        <span className="muted status-me">
+          {myChar?.emoji} {myChar?.name ?? '路人'}
+          {me && !me.alive ? ' · 👻 观战中' : ''}
+        </span>
       </div>
 
-      {/* 手牌与操作 */}
-      <div className="hand-zone">
-        <div className="actions">
+      {/* 行动条 */}
+      <div className="actionbar">
+        <button
+          className={`action-main ${canAct ? 'is-active' : ''}`}
+          disabled={!canAct}
+          onClick={() => sendAct({ action: 'draw' })}
+        >
+          结束回合 · 摸牌
+        </button>
+
+        {canNope && (
           <button
-            className="primary"
-            disabled={!canAct}
-            onClick={() => sendAct({ action: 'draw' })}
+            className="action-nope"
+            onClick={() => myNope && sendAct({ action: 'playCard', instanceId: myNope.instanceId, asNope: true })}
           >
-            结束回合 · 摸牌
+            否认！<span className="nope-count">{nopeRemaining}</span>
           </button>
+        )}
 
-          {canAct && selectedSamePlain && selectedCards.length >= 2 && selectedCards.length <= 3 && (
-            selectedCards.length === 2 ? (
-              <button
-                onClick={() => setTargetMode({ kind: 'play', combo: selected.map((s) => myHand.find((c) => c.instanceId === s)!.instanceId) })}
-              >
-                对子出牌（偷随机牌）→ 选目标
-              </button>
-            ) : (
-              <NamedComboButton
-                cardMap={cardMap}
-                onPick={(cardId) =>
-                  setTargetMode({
-                    kind: 'play',
-                    combo: selected.map((s) => myHand.find((c) => c.instanceId === s)!.instanceId),
-                    wantCardId: cardId,
-                  })
-                }
-              />
-            )
-          )}
+        {canAct && selectedSamePlain && selectedCards.length === 2 && (
+          <button
+            className="action-combo"
+            onClick={() =>
+              setTargetMode({
+                kind: 'play',
+                combo: selected.map((s) => myHand.find((c) => c.instanceId === s)!.instanceId),
+              })
+            }
+          >
+            对子 · 偷随机牌 →
+          </button>
+        )}
+        {canAct && selectedSamePlain && selectedCards.length === 3 && (
+          <NamedComboButton
+            cardMap={cardMap}
+            onPick={(cardId) =>
+              setTargetMode({
+                kind: 'play',
+                combo: selected.map((s) => myHand.find((c) => c.instanceId === s)!.instanceId),
+                wantCardId: cardId,
+              })
+            }
+          />
+        )}
 
-          {canAct && activeSkill && skillUsesLeft > 0 && (
-            <button onClick={() => setSkillOpen(true)}>
-              {myChar!.emoji} {activeSkill.name}（剩 {skillUsesLeft} 次）
-            </button>
-          )}
+        {canAct && activeSkill && skillUsesLeft > 0 && (
+          <button className="action-skill" onClick={() => setSkillOpen(true)}>
+            {myChar!.emoji} {activeSkill.name} ×{skillUsesLeft}
+          </button>
+        )}
 
-          {selected.length > 0 && (
-            <button className="muted" style={{ fontSize: 12 }} onClick={() => setSelected([])}>
-              取消选择（{selected.length}）
-            </button>
-          )}
-        </div>
-
-        <div className="hand">
-          <AnimatePresence>
-            {myHand.map((card) => (
-              <motion.div
-                key={card.instanceId}
-                layout
-                initial={{ y: 60, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: -120, opacity: 0, rotate: -8 }}
-                transition={{ type: 'spring', stiffness: 320, damping: 28 }}
-              >
-                <CardView
-                  def={card.def}
-                  selected={selected.includes(card.instanceId)}
-                  onClick={() => onCardClick(card)}
-                />
-              </motion.div>
-            ))}
-          </AnimatePresence>
-          {myHand.length === 0 && (
-            <span className="muted" style={{ alignSelf: 'center' }}>（没有手牌）</span>
-          )}
-        </div>
+        {selected.length > 0 && (
+          <button className="muted action-clear" onClick={() => setSelected([])}>
+            取消选择({selected.length})
+          </button>
+        )}
       </div>
+
+      {/* 手牌 */}
+      <footer className="handzone">
+        <HandFan
+          cards={fanCards}
+          interactive={!!canAct}
+          selected={selected}
+          playable={playable}
+          onCardClick={onCardClick}
+        />
+      </footer>
 
       {/* 日志 */}
-      <div className="log-panel">
-        {log.slice(-14).map((line, i) => (
+      <aside className="log-panel">
+        {log.slice(-10).map((line, i) => (
           <div className="log-line" key={i}>{line}</div>
         ))}
-      </div>
-
-      {/* 否认条 */}
-      {state.nopeActive && (
-        <div className="nope-bar">
-          <span className="nope-countdown">{nopeRemaining}</span>
-          <div>
-            <div style={{ fontSize: 14 }}>
-              {players.find((p) => p.sessionId === state.nopePlayBy)?.name} 打出了{' '}
-              <strong>{nopeCards.map((c) => c.name).join(' + ')}</strong>
-            </div>
-            <div className="muted" style={{ fontSize: 12 }}>
-              {nopedBy.length % 2 === 1 ? '⛔ 已被否认（等待反否认…）' : '✅ 即将生效（可否认）'}
-              {nopedBy.length > 0 && ` · 已有 ${nopedBy.length} 张否认`}
-            </div>
-          </div>
-          <button className="danger" disabled={!canNope} onClick={() => myNope && sendAct({ action: 'playCard', instanceId: myNope.instanceId, asNope: true })}>
-            打出否认
-          </button>
-        </div>
-      )}
+      </aside>
 
       {/* Toast */}
       {game.toast && <div className="toast">{game.toast.text}</div>}
@@ -394,7 +442,7 @@ export default function GamePage() {
         <div className="h-row">
           {(game.peek?.cards ?? []).map((c, i) => (
             <div key={i} style={{ textAlign: 'center' }}>
-              <CardView def={c} />
+              <CardView def={c} size="hand" />
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>第 {i + 1} 张</div>
             </div>
           ))}
@@ -409,7 +457,7 @@ export default function GamePage() {
       >
         <div className="h-row">
           {(game.peekHandInfo?.cards ?? []).map((c, i) => (
-            <CardView key={i} def={c} small />
+            <CardView key={i} def={c} size="mini" />
           ))}
           {(game.peekHandInfo?.cards?.length ?? 0) === 0 && (
             <span className="muted">对方没有手牌</span>
@@ -433,7 +481,7 @@ export default function GamePage() {
         </div>
       </Modal>
 
-      {/* 拆解位置：完全由 schema 状态驱动（subPhase + defuseBy），无消息时序问题 */}
+      {/* 拆解位置（schema 驱动） */}
       <DefuseModal
         open={
           state.phase === 'playing' &&
@@ -450,7 +498,6 @@ export default function GamePage() {
       <Modal open={skillOpen} title={`${myChar?.emoji} ${activeSkill?.name ?? ''}`} onClose={() => setSkillOpen(false)}>
         {activeSkill && (
           <SkillDialog
-            skillName={activeSkill.name}
             description={myChar?.description ?? ''}
             costCards={(activeSkill.effect as { costCards: number }).costCards}
             needsTarget={(activeSkill.effect as { kind: string }).kind === 'activeSteal'}
@@ -512,12 +559,14 @@ function NamedComboButton({
   const cards = [...cardMap.values()].filter((c) => c.kind !== 'exploding');
   return (
     <>
-      <button onClick={() => setOpen(true)}>三连出牌（指名偷牌）→ 选牌与目标</button>
+      <button className="action-combo" onClick={() => setOpen(true)}>
+        三连 · 指名偷牌 →
+      </button>
       <Modal open={open} title="指定要偷的牌" onClose={() => setOpen(false)}>
         <div className="h-row" style={{ maxHeight: 300, overflowY: 'auto' }}>
           {cards.map((c) => (
             <div key={c.id} style={{ textAlign: 'center' }}>
-              <CardView def={c} small onClick={() => { setOpen(false); onPick(c.id); }} />
+              <CardView def={c} size="mini" onClick={() => { setOpen(false); onPick(c.id); }} />
             </div>
           ))}
         </div>
@@ -532,8 +581,8 @@ function DefuseModal({ open, deckCount }: { open: boolean; deckCount: number }) 
   return (
     <Modal open={open} title="🔧 拆解爆炸猫！选择放回位置">
       <p className="muted" style={{ fontSize: 13 }}>
-        把爆炸猫放回牌堆第 <strong style={{ color: 'var(--accent)', fontSize: 18 }}>{pos}</strong> 张（0 =
-        牌堆顶，最容易再被摸到；{deckCount} = 牌堆底）
+        把爆炸猫放回牌堆第 <strong style={{ color: 'var(--gold)', fontSize: 18 }}>{pos}</strong> 张（0 =
+        牌堆顶；{deckCount} = 牌堆底）
       </p>
       <input
         type="range"
@@ -544,10 +593,7 @@ function DefuseModal({ open, deckCount }: { open: boolean; deckCount: number }) 
         style={{ width: '100%' }}
       />
       <div className="h-row" style={{ marginTop: 16 }}>
-        <button
-          className="primary"
-          onClick={() => sendAct({ action: 'defusePosition', position: pos })}
-        >
+        <button className="primary" onClick={() => sendAct({ action: 'defusePosition', position: pos })}>
           放回去！
         </button>
       </div>
@@ -560,12 +606,13 @@ function AlterModal({ cards }: { cards: CardDef[] | null }) {
   useEffect(() => setOrder([]), [cards]);
   if (!cards) return null;
   return (
-    <Modal open title="👁️‍🗨️ 重排牌堆顶（点按顺序，第 1 个点击的会放到最上面）">
+    <Modal open title="👁️‍🗨️ 重排牌堆顶（点选顺序，先点的放最上面）">
       <div className="h-row">
         {cards.map((c, i) => (
           <div key={i} style={{ textAlign: 'center' }}>
             <CardView
               def={c}
+              size="hand"
               selected={order.includes(i)}
               onClick={() =>
                 setOrder((prev) => (prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i]))
@@ -585,16 +632,13 @@ function AlterModal({ cards }: { cards: CardDef[] | null }) {
         >
           确定
         </button>
-        {order.length > 0 && (
-          <button onClick={() => setOrder([])}>重选</button>
-        )}
+        {order.length > 0 && <button onClick={() => setOrder([])}>重选</button>}
       </div>
     </Modal>
   );
 }
 
 function SkillDialog({
-  skillName,
   description,
   costCards,
   needsTarget,
@@ -605,7 +649,6 @@ function SkillDialog({
   selectedCount,
   onSubmit,
 }: {
-  skillName: string;
   description: string;
   costCards: number;
   needsTarget: boolean;
@@ -616,14 +659,13 @@ function SkillDialog({
   selectedCount: number;
   onSubmit: (targetSessionId?: string, wantCardId?: string) => void;
 }) {
-  void skillName;
   const [target, setTarget] = useState<string | undefined>();
   const [want, setWant] = useState<string | undefined>();
   return (
     <div>
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>{description}</p>
       <p style={{ fontSize: 13 }}>
-        第一步：从手牌下方勾选 <strong>{costCards}</strong> 张作为代价（已选 {selectedCount} 张）
+        第一步：从手牌中点击勾选 <strong>{costCards}</strong> 张作为代价（已选 {selectedCount} 张）
       </p>
       {needsTarget && (
         <>
@@ -647,18 +689,11 @@ function SkillDialog({
       <div className="h-row" style={{ marginTop: 16 }}>
         <button
           className="primary"
-          disabled={
-            selectedCount !== costCards ||
-            (needsTarget && !target) ||
-            (needsNamed && !want)
-          }
+          disabled={selectedCount !== costCards || (needsTarget && !target) || (needsNamed && !want)}
           onClick={() => onSubmit(target, want)}
         >
           发动技能
         </button>
-        <span className="muted" style={{ fontSize: 12 }}>
-          提示：手牌在下方，点击即可选中/取消
-        </span>
       </div>
     </div>
   );

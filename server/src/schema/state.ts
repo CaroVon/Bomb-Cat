@@ -38,10 +38,23 @@ export const GameState = schema(
     deckCount: t.uint8().default(0),
     discardCount: t.uint8().default(0),
     discardTopCardId: t.string().default(''),
+    /** 最近 8 张弃牌（旧→新），驱动散乱弃牌堆 */
+    discardTopIds: t.array('string'),
 
     /** 正在处理拆解/重排的玩家（配合 subPhase 判断弹窗归属，避免依赖消息时序） */
     defuseBy: t.string().default(''),
     alterBy: t.string().default(''),
+
+    /** 最近一次出牌（中央舞台可视化："谁打了什么牌"） */
+    lastPlayBy: t.string().default(''),
+    lastPlayById: t.string().default(''),
+    lastPlayCards: t.array('string'),
+    lastPlayAt: t.number().default(0),
+    lastPlayNoped: t.boolean().default(false),
+
+    /** 最近一次阵亡（爆炸演出） */
+    lastDeathBy: t.string().default(''),
+    lastDeathAt: t.number().default(0),
 
     // 否认窗口
     nopeActive: t.boolean().default(false),

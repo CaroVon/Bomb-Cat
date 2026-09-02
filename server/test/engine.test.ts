@@ -67,6 +67,21 @@ describe('开局', () => {
     const first = e.current()!;
     expect((peeks[0] as any).sessionId).toBe(first.sessionId);
   });
+
+  it('8 人开局：每人保底 1 张拆解、爆炸猫 7 张', () => {
+    const e = setup(7, ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']);
+    expect(e.players).toHaveLength(8);
+    const ev = start(e);
+    expect(ev.some((x) => x.type === 'invalid')).toBe(false);
+    expect(e.phase).toBe('playing');
+    // 8 人：每人 1 拆解（共 8 = defuseTotal(8)），牌堆无多余拆解
+    for (const p of e.players) {
+      expect(p.hand).toHaveLength(7);
+      expect(p.hand.filter((c) => c.cardId === 'defuse')).toHaveLength(1);
+    }
+    expect(e.deck.filter((c) => c.cardId === 'defuse')).toHaveLength(0);
+    expect(e.deck.filter((c) => c.cardId === 'exploding')).toHaveLength(7);
+  });
 });
 
 describe('基础出牌', () => {
@@ -234,13 +249,16 @@ describe('组合与爆炸', () => {
       { iid: 'q2', cardId: 'plain-potato' },
       { iid: 'q3', cardId: 'plain-potato' },
     );
+    const targetShuffleBefore = target.hand.filter((c) => c.cardId === 'shuffle').length;
+    const curShuffleBefore = cur.hand.filter((c) => c.cardId === 'shuffle').length;
     e.playCard(cur.sessionId, {
       instanceId: 'q1',
       comboInstanceIds: ['q2', 'q3'],
       targetSessionId: target.sessionId,
       wantCardId: 'shuffle',
     });
-    expect(cur.hand.some((c) => c.iid === 'victim-shuffle')).toBe(true);
+    expect(cur.hand.filter((c) => c.cardId === 'shuffle')).toHaveLength(curShuffleBefore + 1);
+    expect(target.hand.filter((c) => c.cardId === 'shuffle')).toHaveLength(targetShuffleBefore - 1);
   });
 
   it('摸到爆炸猫有拆解：等待放回位置', () => {

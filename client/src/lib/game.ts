@@ -337,3 +337,13 @@ export function nopeNopedBy(state: any): string[] {
   const t = state?.nopeNopedBy;
   return (t?.toArray?.() ?? t ?? []) as string[];
 }
+
+export function lastPlayCardIds(state: any): string[] {
+  const t = state?.lastPlayCards;
+  return (t?.toArray?.() ?? t ?? []) as string[];
+}
+
+export function discardTopIds(state: any): string[] {
+  const t = state?.discardTopIds;
+  return (t?.toArray?.() ?? t ?? []) as string[];
+}

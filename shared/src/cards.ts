@@ -134,7 +134,7 @@ export const BUILTIN_CARD_MAP: ReadonlyMap<string, CardDef> = new Map(
   BUILTIN_CARDS.map((c) => [c.id, c]),
 );
 
-/** 经典卡组（默认） */
+/** 经典卡组（默认）——55 张动作牌，最多支撑 8 人满员开局 */
 export const CLASSIC_DECK: DeckDef = {
   id: 'classic',
   name: '经典卡组',
@@ -148,10 +148,10 @@ export const CLASSIC_DECK: DeckDef = {
     shuffle: 4,
     peek: 5,
     nope: 5,
-    'plain-melon': 4,
-    'plain-potato': 4,
-    'plain-rainbow': 4,
-    'plain-fuzzy': 3,
-    'plain-beard': 3,
+    'plain-melon': 6,
+    'plain-potato': 6,
+    'plain-rainbow': 6,
+    'plain-fuzzy': 5,
+    'plain-beard': 5,
   },
 };

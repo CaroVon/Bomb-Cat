@@ -326,6 +326,16 @@ export class GameRoom extends Room<{ state: GameState }> {
     s.winnerSessionId = e.winnerSessionId;
     s.defuseBy = e.pendingDefuse?.sessionId ?? '';
     s.alterBy = e.pendingAlter?.sessionId ?? '';
+    GameRoom.syncArray(s.discardTopIds, e.discard.slice(-8).map((i) => i.cardId));
+
+    const lp = e.lastPlay;
+    s.lastPlayBy = lp?.byName ?? '';
+    s.lastPlayById = lp?.bySessionId ?? '';
+    GameRoom.syncArray(s.lastPlayCards, lp?.cardIds ?? []);
+    s.lastPlayAt = lp?.at ?? 0;
+    s.lastPlayNoped = lp?.noped ?? false;
+    s.lastDeathBy = e.lastDeath?.name ?? '';
+    s.lastDeathAt = e.lastDeath?.at ?? 0;
 
     // 回合顺序
     GameRoom.syncArray(s.turnOrder, e.turnOrder);

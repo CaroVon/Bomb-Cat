@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { BUILTIN_CHARACTERS, type DeckDef } from '@bombcat/shared';
+import { BUILTIN_CHARACTERS, MAX_PLAYERS, type DeckDef } from '@bombcat/shared';
 import { eachPlayer, sendAct, useGame } from '../lib/game';
 import { CLASSIC_DECK, loadDecks } from '../lib/decks';
 
@@ -51,7 +51,7 @@ export default function RoomPage() {
     <div className="page">
       <div className="h-row" style={{ marginBottom: 16 }}>
         <span className="title">等待室</span>
-        <span className="tag">{players.length}/5 人</span>
+        <span className="tag">{players.length}/{MAX_PLAYERS} 人</span>
         {isHost && <span className="tag" style={{ borderColor: 'var(--accent)' }}>你是房主</span>}
       </div>
 

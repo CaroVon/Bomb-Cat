@@ -94,7 +94,7 @@ export default function LobbyPage() {
         <div className="panel">
           <h3 style={{ marginTop: 0 }}>创建房间</h3>
           <p className="muted" style={{ fontSize: 13, lineHeight: 1.7 }}>
-            成为房主，获得 4 位房间码，可自定义卡组、邀请最多 4 位朋友。
+            成为房主，获得 4 位房间码，最多可邀请 7 位朋友同场对战。
           </p>
           <button className="primary" onClick={handleCreate} disabled={busy}>
             创建房间

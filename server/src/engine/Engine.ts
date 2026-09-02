@@ -2,6 +2,8 @@ import {
   BUILTIN_CARD_MAP,
   BUILTIN_CHARACTERS,
   CLASSIC_DECK,
+  MAX_PLAYERS,
+  defuseTotal,
   validateDeck,
   type CardDef,
   type CardEffect,
@@ -68,6 +70,19 @@ export class GameEngine {
   winnerSessionId = '';
   deathOrder: string[] = [];
   logLines: string[] = [];
+
+  /** 最近一次出牌（可视化用：中央舞台展示"谁打了什么牌"） */
+  lastPlay: {
+    playId: string;
+    bySessionId: string;
+    byName: string;
+    cardIds: string[];
+    at: number;
+    noped: boolean;
+  } | null = null;
+
+  /** 最近一次阵亡（可视化用：爆炸演出） */
+  lastDeath: { sessionId: string; name: string; at: number } | null = null;
 
   constructor(private rng: Rng = Math.random) {}
 
@@ -137,7 +152,7 @@ export class GameEngine {
 
   addPlayer(sessionId: string, userId: string, name: string): EngineEvent[] {
     if (this.players.some((p) => p.sessionId === sessionId)) return [];
-    if (this.players.length >= 5) return this.invalid(sessionId, '房间已满');
+    if (this.players.length >= MAX_PLAYERS) return this.invalid(sessionId, '房间已满');
     if (this.phase !== 'lobby') return this.invalid(sessionId, '对局已开始，无法加入');
     const player: EnginePlayer = {
       sessionId,
@@ -204,9 +219,18 @@ export class GameEngine {
     }
     this.shuffle(pool);
 
+    // 动作牌至少要够：每人 3 张 + 爆炸猫 + 剩余拆解
+    const defuseLeft = Math.max(0, defuseTotal(n) - n);
+    const exploding = n - 1;
+    if (pool.length < exploding + defuseLeft + n * 3) {
+      return this.invalid(hostSessionId, '卡组牌太少，无法支撑这么多玩家');
+    }
+    // 发牌数按人数自适应（≤6 人发 6 张，人多牌少时自动缩减）
+    const dealCount = Math.min(6, Math.floor((pool.length - exploding - defuseLeft) / n));
+
     this.players.forEach((p) => {
       p.hand = [{ iid: newIid('defuse'), cardId: 'defuse' }];
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < dealCount; i++) {
         p.hand.push(pool.pop()!);
       }
       p.alive = true;
@@ -214,7 +238,6 @@ export class GameEngine {
       p.skillState = {};
     });
 
-    const defuseLeft = Math.max(0, 6 - n);
     for (let i = 0; i < defuseLeft; i++) pool.push({ iid: newIid('defuse'), cardId: 'defuse' });
     for (let i = 0; i < n - 1; i++) pool.push({ iid: newIid('exploding'), cardId: 'exploding' });
     this.deck = this.shuffle(pool);
@@ -350,6 +373,14 @@ export class GameEngine {
       wantCardId,
       nopedBy: [],
     };
+    this.lastPlay = {
+      playId: this.pendingPlay.playId,
+      bySessionId: sessionId,
+      byName: player.name,
+      cardIds: instances.map((i) => i.cardId),
+      at: Date.now(),
+      noped: false,
+    };
     this.subPhase = 'awaiting-nope';
     this.ev(events, { type: 'nopeWindowOpened' });
 
@@ -396,6 +427,9 @@ export class GameEngine {
 
     const noped = pending.nopedBy.length % 2 === 1;
     const player = this.players.find((p) => p.sessionId === pending.sessionId)!;
+    if (this.lastPlay?.playId === pending.playId) {
+      this.lastPlay = { ...this.lastPlay, noped };
+    }
 
     if (noped) {
       const skill = this.skillOf(player, 'onNoped');
@@ -672,6 +706,7 @@ export class GameEngine {
     player.alive = false;
     player.hand = [];
     this.deathOrder.push(player.sessionId);
+    this.lastDeath = { sessionId: player.sessionId, name: player.name, at: Date.now() };
     this.shuffle(this.deck);
     this.log(events, `💥 ${player.name} 摸到了爆炸猫，当场爆炸出局！手牌已洗回牌堆`);
     this.ev(events, { type: 'death', sessionId: player.sessionId });
@@ -934,6 +969,7 @@ export class GameEngine {
     p.hand = [];
     this.shuffle(this.deck);
     this.deathOrder.push(sessionId);
+    this.lastDeath = { sessionId, name: p.name, at: Date.now() };
     this.log(events, `${p.name} 掉线超时，遗憾出局`);
     this.ev(events, { type: 'death', sessionId });
     if (!this.checkWin(events) && this.current()?.sessionId === sessionId) {
