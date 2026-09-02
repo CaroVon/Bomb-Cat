@@ -1,0 +1,23 @@
+{
+  "name": "bombcat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "炸弹猫网页版：联机对战 + 深度定制（自定义卡面/角色技能/特殊卡牌）+ 用户系统",
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,client -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "npm run dev -w @bombcat/server",
+    "dev:client": "npm run dev -w @bombcat/client",
+    "build": "npm run build -w @bombcat/server && npm run build -w @bombcat/client",
+    "test": "npm run test -w @bombcat/shared && npm run test -w @bombcat/server",
+    "typecheck": "npm run typecheck -w @bombcat/shared && npm run typecheck -w @bombcat/server && npm run typecheck -w @bombcat/client"
+  },
+  "devDependencies": {
+    "@colyseus/sdk": "^0.18.2",
+    "concurrently": "^9.2.1"
+  }
+}
