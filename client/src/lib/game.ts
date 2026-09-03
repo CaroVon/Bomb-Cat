@@ -22,6 +22,10 @@ export interface GameSnapshot {
   reconnectHint: { roomId: string; token: string } | null;
   /** 最近收到的表情（id 用于去重触发动画） */
   lastEmote: { id: number; sessionId: string; name: string; emoji: string } | null;
+  /** 我的秘密任务（开局私密下发） */
+  myObjective: { defId: string; defName: string; description: string; targetName?: string } | null;
+  /** 任务达成提示（id 去重） */
+  objectiveDone: { id: number; defId: string; defName: string } | null;
 }
 
 let snap: GameSnapshot = {
@@ -39,6 +43,8 @@ let snap: GameSnapshot = {
   gameEnd: null,
   reconnectHint: null,
   lastEmote: null,
+  myObjective: null,
+  objectiveDone: null,
 };
 
 const listeners = new Set<() => void>();
@@ -160,6 +166,17 @@ function attach(room: Room<any>): void {
     snap.lastEmote = { id: Date.now() + Math.random(), ...msg };
     emit();
   });
+  room.onMessage(
+    'objective',
+    (msg: { defId: string; defName: string; description: string; targetName?: string }) => {
+      snap.myObjective = msg;
+      emit();
+    },
+  );
+  room.onMessage('objectiveDone', (msg: { defId: string; defName: string }) => {
+    snap.objectiveDone = { id: Date.now() + Math.random(), ...msg };
+    emit();
+  });
 
   room.onLeave((code) => {
     if (code === 1000) {
@@ -182,7 +199,7 @@ function attach(room: Room<any>): void {
 
 export async function createRoom(
   name: string,
-  options?: { bots?: number },
+  options?: { bots?: number; run?: boolean; runBonuses?: string[]; extraExploding?: number },
 ): Promise<void> {
   snap.status = 'connecting';
   snap.error = null;

@@ -21,6 +21,7 @@ import { deleteDeck, loadDecks, saveDeck } from '../lib/decks';
 import { decodeDeck, encodeDeck } from '../lib/share';
 import { CardView, setSkinMap } from '../components/CardView';
 import Modal from '../components/Modal';
+import { BuildSection, RulesCodex } from '../components/BuildEditor';
 
 const EFFECT_LABEL: Record<string, string> = {
   skip: '跳过（结束回合不摸牌）',
@@ -47,6 +48,8 @@ export default function EditorPage() {
       </p>
       <SkinSection />
       <DeckSection />
+      <BuildSection />
+      <RulesCodex />
     </div>
   );
 }

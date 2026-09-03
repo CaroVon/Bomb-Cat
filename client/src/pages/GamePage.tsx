@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BUILTIN_CHARACTERS, type CardDef, type HandCard } from '@bombcat/shared';
+import { BUILTIN_CHARACTERS, RUN_BONUS_MAP, type CardDef, type HandCard } from '@bombcat/shared';
 import {
   buildCardMap,
   clearAlterPrompt,
@@ -21,6 +21,7 @@ import { animMs, getSettings, setSetting } from '../lib/settings';
 import { sfx } from '../lib/sound';
 import { explodeAt, winCelebration } from '../lib/fx';
 import { recordMatch } from '../lib/stats';
+import { advanceStage, endRun, loadRun, offerBonuses } from '../lib/run';
 import { CardView, setSkinMap } from '../components/CardView';
 import Modal from '../components/Modal';
 import { Seat, type SeatData } from '../components/table/Seat';
@@ -58,6 +59,9 @@ export default function GamePage() {
   const [skillOpen, setSkillOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [emoteOpen, setEmoteOpen] = useState(false);
+  const [ruleDetailOpen, setRuleDetailOpen] = useState(false);
+  const [objOpen, setObjOpen] = useState(false);
+  const [bonusChoices, setBonusChoices] = useState<string[] | null>(null);
   /** 座位表情气泡：sessionId -> {emoji, id} */
   const [emoteBubbles, setEmoteBubbles] = useState<Record<string, { emoji: string; id: number }>>({});
   const [settings, setSettingsState] = useState(getSettings());
@@ -202,7 +206,7 @@ export default function GamePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game.toast?.id]);
 
-  // 胜利庆祝（只放一次）+ 战绩记录
+  // 胜利庆祝（只放一次）+ 战绩记录 + 无尽挑战推进
   const gameEnded = !!game.gameEnd;
   useEffect(() => {
     if (gameEnded && !celebratedRef.current) {
@@ -218,6 +222,18 @@ export default function GamePage() {
           deckName: state?.deckName ?? '经典卡组',
           characterId: me?.characterId ?? 'none',
         });
+      }
+      // 无尽挑战：获胜 → 三选一增益；失败 → run 结束
+      const run = loadRun();
+      if (run && end) {
+        if (end.winnerName && mine?.place === 1) {
+          setBonusChoices(offerBonuses(run.bonuses));
+        } else {
+          const summary = endRun();
+          window.setTimeout(() => {
+            window.alert(`🔥 无尽挑战结束：到达第 ${summary.stage} 关（历史最佳 ${summary.best} 关）`);
+          }, 1200);
+        }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -424,6 +440,21 @@ export default function GamePage() {
             {emoteBubbles[me.sessionId]!.emoji}
           </span>
         )}
+        {state.worldRuleName && (
+          <button
+            className="rule-chip"
+            title={state.worldRuleDesc}
+            onClick={() => setRuleDetailOpen(true)}
+          >
+            {state.worldRuleEmoji} {state.worldRuleName}
+          </button>
+        )}
+        {game.myObjective && !game.objectiveDone && (
+          <button className="obj-chip" onClick={() => setObjOpen(true)} title="查看我的秘密任务">
+            🎯 {game.myObjective.defName}
+          </button>
+        )}
+        {game.objectiveDone && <span className="obj-chip is-done">🎯 {game.objectiveDone.defName} ✓</span>}
         <span className={`status-turn ${isMyTurn ? 'is-mine' : ''}`}>
           {state.phase === 'finished'
             ? '🏆 对局结束'
@@ -684,12 +715,30 @@ export default function GamePage() {
             <h3 style={{ marginTop: 0 }}>🏆 {game.gameEnd.winnerName} 获胜！</h3>
             <div style={{ lineHeight: 2.2 }}>
               {game.gameEnd.ranking.map((r) => (
-                <div key={r.sessionId}>
-                  第 {r.place} 名 · {r.name}
-                  {r.sessionId === myId && '（你）'}
+                <div key={r.sessionId} className="h-row" style={{ justifyContent: 'space-between', maxWidth: 380 }}>
+                  <span>
+                    第 {r.place} 名 · {r.name}
+                    {r.sessionId === myId && '（你）'}
+                  </span>
+                  {(() => {
+                    const obj = game.gameEnd?.objectives?.find((o) => o.sessionId === r.sessionId);
+                    return obj && obj.defName ? (
+                      <span className={`tag ${obj.done ? 'obj-done-tag' : ''}`}>
+                        {obj.done ? '🎯✓' : '🎯✗'} {obj.defName}
+                      </span>
+                    ) : null;
+                  })()}
                 </div>
               ))}
             </div>
+            {(() => {
+              const mine = game.gameEnd?.objectives?.find((o) => o.sessionId === myId);
+              return mine?.done ? (
+                <p style={{ color: 'var(--gold)', fontWeight: 700, marginTop: 12 }}>
+                  🎯 秘密任务达成：{mine.defName}（+50 积分）
+                </p>
+              ) : null;
+            })()}
             <div className="h-row" style={{ marginTop: 18 }}>
               <button className="primary" onClick={() => { clearGameEnd(); leaveRoom(); navigate('/lobby'); }}>
                 返回大厅
@@ -697,6 +746,82 @@ export default function GamePage() {
             </div>
           </>
         )}
+      </Modal>
+
+      {/* World Rule 详情 */}
+      <Modal open={ruleDetailOpen} title="本局规则" onClose={() => setRuleDetailOpen(false)}>
+        <div className="h-row" style={{ gap: 16 }}>
+          <span style={{ fontSize: 52 }}>{state.worldRuleEmoji}</span>
+          <div>
+            <h3 style={{ margin: '0 0 6px' }}>{state.worldRuleName}</h3>
+            <p className="muted" style={{ margin: 0, fontSize: 14 }}>{state.worldRuleDesc}</p>
+          </div>
+        </div>
+      </Modal>
+
+      {/* 我的秘密任务 */}
+      <Modal open={objOpen && !!game.myObjective} title="🎯 我的秘密任务" onClose={() => setObjOpen(false)}>
+        {game.myObjective && (
+          <div>
+            <h3 style={{ margin: '0 0 6px' }}>{game.myObjective.defName}</h3>
+            <p className="muted" style={{ margin: 0, fontSize: 14 }}>
+              {game.myObjective.description}
+              {game.myObjective.targetName && (
+                <>
+                  <br />
+                  目标：<strong>{game.myObjective.targetName}</strong>
+                </>
+              )}
+            </p>
+            {game.objectiveDone && (
+              <p style={{ color: 'var(--gold)', fontWeight: 700, marginTop: 10 }}>
+                ✅ 已达成！结算时 +50 积分
+              </p>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* 无尽挑战：胜局三选一增益 */}
+      <Modal open={!!bonusChoices} title="🔥 选择本关奖励（下一关生效）">
+        <div className="h-row" style={{ gap: 14 }}>
+          {(bonusChoices ?? []).map((id) => {
+            const def = RUN_BONUS_MAP.get(id);
+            if (!def) return null;
+            return (
+              <div
+                key={id}
+                className="char-card"
+                style={{ minWidth: 170, cursor: 'pointer' }}
+                onClick={async () => {
+                  setBonusChoices(null);
+                  clearGameEnd();
+                  leaveRoom();
+                  await advanceStage(id as never);
+                  navigate('/game');
+                }}
+              >
+                <span style={{ fontSize: 34 }}>{def.emoji}</span>
+                <h4 style={{ margin: '8px 0 2px' }}>{def.name}</h4>
+                <p style={{ margin: 0 }}>{def.description}</p>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <button
+            onClick={() => {
+              setBonusChoices(null);
+              clearGameEnd();
+              leaveRoom();
+              const summary = endRun();
+              alert(`无尽挑战结束：到达第 ${summary.stage} 关（历史最佳 ${summary.best} 关）`);
+              navigate('/lobby');
+            }}
+          >
+            结束挑战
+          </button>
+        </div>
       </Modal>
     </div>
   );

@@ -3,7 +3,13 @@ import {
   BUILTIN_CHARACTERS,
   CLASSIC_DECK,
   MAX_PLAYERS,
+  OBJECTIVE_MAP,
+  OBJECTIVES,
+  WORLD_RULES,
+  WORLD_RULE_MAP,
+  BUILD_HAND_CARDS,
   defuseTotal,
+  validateBuild,
   validateDeck,
   type CardDef,
   type CardEffect,
@@ -22,6 +28,14 @@ import type {
   SubPhase,
   UseSkillInput,
 } from './types';
+import {
+  assignObjectives as assignObjs,
+  objectiveDefuse as objDefuse,
+  objectiveHandCheck as objHand,
+  objectivePlay as objPlay,
+  objectiveSteal as objSteal,
+  objectiveReport,
+} from './objectives.js';
 
 let instanceSeq = 0;
 const newIid = (cardId: string): string => `${cardId}#${++instanceSeq}`;
@@ -72,6 +86,12 @@ export class GameEngine {
   winnerSessionId = '';
   deathOrder: string[] = [];
   logLines: string[] = [];
+
+  /** 本局 World Rule（空串=无规则） */
+  worldRuleId = '';
+
+  /** World Rule 防爆过剩的额外拆解数（startGame 内计算） */
+  private defuseExtraPool = 0;
 
   /** 最近一次出牌（可视化用：中央舞台展示"谁打了什么牌"） */
   lastPlay: {
@@ -166,6 +186,12 @@ export class GameEngine {
       connected: true,
       turnsLeft: 1,
       skillState: {},
+      buildUsed: false,
+      runBonuses: [],
+      playsThisTurn: 0,
+      defuseUsed: 0,
+      attackedThisGame: false,
+      objective: null,
     };
     this.players.push(player);
     if (!this.hostSessionId) this.hostSessionId = sessionId;
@@ -198,7 +224,20 @@ export class GameEngine {
   /* 开局                                                                */
   /* ------------------------------------------------------------------ */
 
-  startGame(hostSessionId: string, deckDef: DeckDef | null): EngineEvent[] {
+  startGame(
+    hostSessionId: string,
+    deckDef: DeckDef | null,
+    options?: {
+      /** 个人出战构筑：sessionId -> 10 张 cardId（6 张随机入起手，4 张洗入公共堆） */
+      builds?: Record<string, string[]>;
+      /** 指定本局 World Rule（缺省随机）；null 表示禁用 */
+      worldRuleId?: string | null;
+      /** 无尽挑战增益（按 sessionId） */
+      runBonuses?: Record<string, string[]>;
+      /** 额外爆炸猫数量（无尽挑战难度递增） */
+      extraExploding?: number;
+    },
+  ): EngineEvent[] {
     if (this.phase !== 'lobby') return this.invalid(hostSessionId, '对局已在进行');
     if (hostSessionId !== this.hostSessionId) {
       return this.invalid(hostSessionId, '只有房主能开始游戏');
@@ -215,6 +254,15 @@ export class GameEngine {
     this.cardMap = new Map(BUILTIN_CARD_MAP);
     for (const c of deck.customCards) this.cardMap.set(c.id, c);
 
+    // World Rule：指定 or 随机（null 禁用）
+    if (options?.worldRuleId === null) {
+      this.worldRuleId = '';
+    } else if (options?.worldRuleId && WORLD_RULE_MAP.has(options.worldRuleId)) {
+      this.worldRuleId = options.worldRuleId;
+    } else {
+      this.worldRuleId = WORLD_RULES[Math.floor(this.rng() * WORLD_RULES.length)]!.id;
+    }
+
     const pool: CardInstance[] = [];
     for (const [cardId, count] of Object.entries(deck.counts)) {
       for (let i = 0; i < count; i++) pool.push({ iid: newIid(cardId), cardId });
@@ -223,27 +271,70 @@ export class GameEngine {
 
     // 动作牌至少要够：每人 3 张 + 爆炸猫 + 剩余拆解
     const defuseLeft = Math.max(0, defuseTotal(n) - n);
-    const exploding = n - 1;
+    const exploding = n - 1 + (options?.extraExploding ?? 0);
     if (pool.length < exploding + defuseLeft + n * 3) {
       return this.invalid(hostSessionId, '卡组牌太少，无法支撑这么多玩家');
     }
     // 发牌数按人数自适应（≤6 人发 6 张，人多牌少时自动缩减）
     const dealCount = Math.min(6, Math.floor((pool.length - exploding - defuseLeft) / n));
 
+    // 个人构筑：校验通过者用自选 10 张（随机 6 入手，余 4 入公共堆）
+    if (options?.builds) {
+      for (const [sid, build] of Object.entries(options.builds)) {
+        const p = this.players.find((x) => x.sessionId === sid);
+        if (!p) continue;
+        const v = validateBuild(build, this.cardMap);
+        if (!v.ok) {
+          return this.invalid(hostSessionId, `${p.name} 的构筑不合法：${v.error}`);
+        }
+      }
+    }
     this.players.forEach((p) => {
-      p.hand = [{ iid: newIid('defuse'), cardId: 'defuse' }];
-      for (let i = 0; i < dealCount; i++) {
-        p.hand.push(pool.pop()!);
+      p.runBonuses = options?.runBonuses?.[p.sessionId] ?? [];
+      p.buildUsed = false;
+      const build = options?.builds?.[p.sessionId];
+      if (build && validateBuild(build, this.cardMap).ok) {
+        const insts = build.map((cardId) => ({ iid: newIid(cardId), cardId }));
+        this.shuffle(insts);
+        p.hand = [{ iid: newIid('defuse'), cardId: 'defuse' }, ...insts.slice(0, BUILD_HAND_CARDS)];
+        pool.push(...insts.slice(BUILD_HAND_CARDS));
+        p.buildUsed = true;
+      } else {
+        p.hand = [{ iid: newIid('defuse'), cardId: 'defuse' }];
+        for (let i = 0; i < dealCount; i++) {
+          p.hand.push(pool.pop()!);
+        }
       }
       p.alive = true;
       p.turnsLeft = 1;
       p.skillState = {};
+      p.playsThisTurn = 0;
+      p.defuseUsed = 0;
+      p.attackedThisGame = false;
     });
 
-    for (let i = 0; i < defuseLeft; i++) pool.push({ iid: newIid('defuse'), cardId: 'defuse' });
-    for (let i = 0; i < n - 1; i++) pool.push({ iid: newIid('exploding'), cardId: 'exploding' });
+    // World Rule 防爆过剩：额外 2 张拆解
+    if (this.worldRuleId === 'defuse-plenty') {
+      this.defuseExtraPool = 2;
+    } else {
+      this.defuseExtraPool = 0;
+    }
+    for (let i = 0; i < defuseLeft + this.defuseExtraPool; i++) {
+      pool.push({ iid: newIid('defuse'), cardId: 'defuse' });
+    }
+    for (let i = 0; i < exploding; i++) {
+      pool.push({ iid: newIid('exploding'), cardId: 'exploding' });
+    }
     this.deck = this.shuffle(pool);
     this.discard = [];
+
+    // runBonuses：厚实起手 / 随身工具箱
+    this.players.forEach((p) => {
+      if (p.runBonuses.includes('extra-deal')) p.hand.push(pool.pop()!);
+      if (p.runBonuses.includes('extra-defuse')) {
+        p.hand.push({ iid: newIid('defuse'), cardId: 'defuse' });
+      }
+    });
 
     this.turnOrder = this.players.map((p) => p.sessionId);
     this.turnIndex = Math.floor(this.rng() * this.turnOrder.length);
@@ -254,11 +345,51 @@ export class GameEngine {
     this.deathOrder = [];
     this.turnCount = 0;
 
+    // 秘密任务：每人随机一条（比命长需指定目标）
+    assignObjs(this.players, (a) => this.shuffle(a));
+
     const events: EngineEvent[] = [];
     this.players.forEach((p) => this.ev(events, { type: 'hand', sessionId: p.sessionId }));
 
+    // 秘密任务私密下发（不进公开日志）
+    for (const p of this.players) {
+      if (!p.objective) continue;
+      const def = OBJECTIVE_MAP.get(p.objective.defId);
+      if (!def) continue;
+      const targetName = p.objective.targetSessionId
+        ? this.players.find((x) => x.sessionId === p.objective!.targetSessionId)?.name
+        : undefined;
+      this.ev(events, {
+        type: 'private',
+        sessionId: p.sessionId,
+        message: {
+          action: 'objective',
+          defId: def.id,
+          defName: def.name,
+          description: def.description,
+          targetName,
+        },
+      });
+    }
+
+    // runBonuses：先知（开局看牌堆顶 3 张）
+    this.players.forEach((p) => {
+      if (p.runBonuses.includes('start-peek')) {
+        const top = this.deck.slice(-3).reverse();
+        this.ev(events, {
+          type: 'private',
+          sessionId: p.sessionId,
+          message: { action: 'peekDeck', cards: top.map((i) => this.defOf(i)) },
+        });
+      }
+    });
+
+    const rule = WORLD_RULE_MAP.get(this.worldRuleId);
     const first = this.current()!;
-    this.log(events, `游戏开始！卡组【${this.deckDef.name}】，${n} 名玩家，${first.name} 先手（牌堆 ${this.deck.length} 张）`);
+    this.log(
+      events,
+      `游戏开始！卡组【${this.deckDef.name}】，${n} 名玩家，${first.name} 先手（牌堆 ${this.deck.length} 张）${rule ? `；本局规则 ${rule.emoji}【${rule.name}】` : ''}`,
+    );
 
     // gameStart 技能
     for (const p of this.players) {
@@ -388,6 +519,7 @@ export class GameEngine {
       wantCardId,
       nopedBy: [],
     };
+    objPlay(player, events);
     this.lastPlay = {
       playId: this.pendingPlay.playId,
       bySessionId: sessionId,
@@ -533,6 +665,19 @@ export class GameEngine {
       case 'skip':
       case 'attack':
       case 'targetedAttack':
+        // World Rule 疯狂抽卡：打出跳过后额外摸一张（换一张）
+        if (effect.type === 'skip' && this.worldRuleId === 'mad-draw') {
+          const c = this.deck.pop();
+          if (c) {
+            if (c.cardId === 'exploding') {
+              const r = this.handleExplosion(player, c, events);
+              if (r === 'suspend-defuse' || !player.alive) return 'ok';
+            } else {
+              player.hand.push(c);
+              this.ev(events, { type: 'hand', sessionId: player.sessionId });
+            }
+          }
+        }
         return 'ok'; // 回合结束语义在 finishTurn 统一处理
 
       case 'shuffle': {
@@ -598,6 +743,7 @@ export class GameEngine {
         this.ev(events, { type: 'hand', sessionId: target.sessionId });
         this.ev(events, { type: 'hand', sessionId: player.sessionId });
         this.log(events, `${player.name} 从 ${target.name} 那里偷走了 1 张牌 🤏`);
+        objSteal(player, events);
         return 'ok';
       }
 
@@ -682,18 +828,28 @@ export class GameEngine {
     if (!player || player.sessionId !== sessionId) return this.invalid(sessionId, '还没轮到你');
 
     const events: EngineEvent[] = [];
-    const c = this.deck.pop();
-    if (!c) return this.invalid(sessionId, '牌堆空了');
-
-    if (c.cardId === 'exploding') {
-      const r = this.handleExplosion(player, c, events);
-      // 拆解挂起 / 已阵亡（内部已推进回合）；藏猫 → 照常结束回合
-      if (r === 'suspend-defuse' || !player.alive) return events;
-      return this.finishTurn(events);
+    const draws = this.worldRuleId === 'double-down' ? 2 : 1;
+    let drew = 0;
+    while (drew < draws) {
+      drew++;
+      const c = this.deck.pop();
+      if (!c) break;
+      if (c.cardId === 'exploding') {
+        const r = this.handleExplosion(player, c, events);
+        // 拆解挂起 / 已阵亡（内部已推进回合）；藏猫 → 照常结束回合
+        if (r === 'suspend-defuse' || !player.alive) return events;
+        if (drew >= draws) return this.finishTurn(events);
+        continue;
+      }
+      player.hand.push(c);
+      this.ev(events, { type: 'hand', sessionId });
     }
-    player.hand.push(c);
-    this.ev(events, { type: 'hand', sessionId });
-    this.log(events, `${player.name} 摸了一张牌`);
+    if (this.worldRuleId === 'double-down') {
+      this.log(events, `${player.name} 双倍下注，摸了 2 张牌 🎰`);
+    } else {
+      this.log(events, `${player.name} 摸了一张牌`);
+    }
+    objHand(player, events);
     return this.finishTurn(events);
   }
 
@@ -711,6 +867,7 @@ export class GameEngine {
       this.pendingDefuse = { sessionId: player.sessionId, instanceId: kitten.iid };
       this.subPhase = 'awaiting-defuse';
       this.log(events, `${player.name} 摸到了爆炸猫，打出拆解 🔧`);
+      objDefuse(player, events);
       this.ev(events, {
         type: 'private',
         sessionId: player.sessionId,
@@ -852,7 +1009,7 @@ export class GameEngine {
       const victimId = attack.targeted ?? this.nextAliveSessionId();
       const victim = this.players.find((p) => p.sessionId === victimId);
       if (victim && victim.alive) {
-        victim.turnsLeft = transfer + 2;
+        victim.turnsLeft = transfer + (this.worldRuleId === 'overdrive' ? 4 : 2);
         this.turnIndex = this.turnOrder.indexOf(victim.sessionId);
         this.turnCount++;
         this.log(events, `${victim.name} 被攻击，要连续行动 ${victim.turnsLeft} 个回合 ⚡`);
@@ -893,6 +1050,29 @@ export class GameEngine {
   }
 
   private runTurnStartSkills(player: EnginePlayer, events: EngineEvent[]): void {
+    // World Rule 传递快乐：随机一张传给下家
+    if (this.worldRuleId === 'pass-joy' && player.alive && player.hand.length > 0) {
+      const nextId = this.nextAliveSessionId();
+      const next = this.players.find((p) => p.sessionId === nextId);
+      if (next && next.sessionId !== player.sessionId) {
+        const idx = Math.floor(this.rng() * player.hand.length);
+        const [card] = player.hand.splice(idx, 1);
+        next.hand.push(card!);
+        this.ev(events, { type: 'hand', sessionId: player.sessionId });
+        this.ev(events, { type: 'hand', sessionId: next.sessionId });
+        const name = this.cardMap.get(card!.cardId)?.name ?? '';
+        this.log(events, `🎁 ${player.name} 传了一张牌给 ${next.name}（是${name}…才不告诉你）`);
+      }
+    }
+    // World Rule 全员天眼：当前玩家看牌堆顶 1 张
+    if (this.worldRuleId === 'all-seeing' && this.deck.length > 0) {
+      const top = this.deck[this.deck.length - 1]!;
+      this.ev(events, {
+        type: 'private',
+        sessionId: player.sessionId,
+        message: { action: 'peekDeck', cards: [this.defOf(top)] },
+      });
+    }
     const skill = this.skillOf(player, 'turnStart');
     if (skill?.effect.kind === 'peekAtTurnStart') {
       const n = Math.min(skill.effect.count, this.deck.length);
@@ -941,7 +1121,11 @@ export class GameEngine {
     this.winnerSessionId = winnerSessionId ?? '';
     const winner = this.players.find((p) => p.sessionId === this.winnerSessionId);
     if (winner) this.log(events, `🏆 ${winner.name} 获得胜利！`);
-    this.ev(events, { type: 'gameEnd', winnerSessionId: this.winnerSessionId });
+    this.ev(events, {
+      type: 'gameEnd',
+      winnerSessionId: this.winnerSessionId,
+      objectives: objectiveReport(this.players),
+    } as EngineEvent);
     return true;
   }
 

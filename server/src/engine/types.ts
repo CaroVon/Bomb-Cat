@@ -29,6 +29,26 @@ export interface EnginePlayer {
   /** 连击剩余回合数（含当前回合） */
   turnsLeft: number;
   skillState: Record<string, SkillRuntimeState>;
+  /* ---- 迭代五：策略层状态（服务端内部，不进同步 schema） ---- */
+  /** 本局使用的个人构筑（true=用了 10 张自选） */
+  buildUsed: boolean;
+  /** 无尽挑战增益 */
+  runBonuses: string[];
+  /** 本回合已出牌数（连出王任务） */
+  playsThisTurn: number;
+  /** 拆解使用次数（拆弹部队任务） */
+  defuseUsed: number;
+  /** 是否打过攻击牌（和平主义任务） */
+  attackedThisGame: boolean;
+  /** 秘密任务 */
+  objective: {
+    defId: string;
+    /** 比命长目标 */
+    targetSessionId?: string;
+    /** 计数器（偷牌数等） */
+    counter: number;
+    done: boolean;
+  } | null;
 }
 
 export type SubPhase =
@@ -76,7 +96,17 @@ export type EngineEvent =
   | { type: 'alterResolved' }
   | { type: 'death'; sessionId: string }
   | { type: 'invalid'; sessionId: string; message: string }
-  | { type: 'gameEnd'; winnerSessionId: string };
+  | {
+      type: 'gameEnd';
+      winnerSessionId: string;
+      objectives?: Array<{
+        sessionId: string;
+        name: string;
+        defId: string;
+        defName: string;
+        done: boolean;
+      }>;
+    };
 
 export interface PlayCardInput {
   instanceId: string;

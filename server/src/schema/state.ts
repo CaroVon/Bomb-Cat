@@ -15,6 +15,8 @@ export const PlayerState = schema(
     connected: t.boolean().default(true),
     turnsLeft: t.uint8().default(1),
     isHost: t.boolean().default(false),
+    /** 已提交个人构筑（等待室展示） */
+    buildReady: t.boolean().default(false),
     /** 主动技能剩余次数（skillId -> 次数） */
     skillUsesLeft: t.map('number'),
   },
@@ -73,6 +75,12 @@ export const GameState = schema(
 
     winnerSessionId: t.string().default(''),
     log: t.array('string'),
+
+    /** 本局 World Rule（公开：全员可见） */
+    worldRuleId: t.string().default(''),
+    worldRuleName: t.string().default(''),
+    worldRuleDesc: t.string().default(''),
+    worldRuleEmoji: t.string().default(''),
   },
   'GameState',
 );

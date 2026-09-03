@@ -24,7 +24,7 @@ function start(e: GameEngine, characterIds: Record<string, string> = {}): Engine
   for (const [name, ch] of Object.entries(characterIds)) {
     e.setCharacter(`s:${name}`, ch);
   }
-  return e.startGame(e.hostSessionId, null);
+  return e.startGame(e.hostSessionId, null, { worldRuleId: null });
 }
 
 const hand = (e: GameEngine, name: string) => e.handOf(`s:${name}`);
@@ -62,7 +62,9 @@ describe('开局', () => {
   it('预言家回合开始时收到私密看牌', () => {
     const e = setup();
     const events = start(e, { A: 'oracle', B: 'oracle', C: 'oracle' });
-    const peeks = events.filter((x) => x.type === 'private');
+    const peeks = events.filter(
+      (x) => x.type === 'private' && (x as any).message.action === 'peekDeck',
+    );
     expect(peeks.length).toBe(1); // 只有先手看到
     const first = e.current()!;
     expect((peeks[0] as any).sessionId).toBe(first.sessionId);

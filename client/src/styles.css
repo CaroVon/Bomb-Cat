@@ -956,6 +956,8 @@ select:focus {
   max-height: 82vh;
   overflow-y: auto;
   box-shadow: var(--shadow-3);
+  position: relative;
+  z-index: 101;
 }
 
 .toast {
@@ -1390,4 +1392,50 @@ button,
   .emote-wheel button {
     min-height: 40px;
   }
+
+  .rule-chip,
+  .obj-chip {
+    font-size: 10px;
+    padding: 2px 8px;
+  }
+}
+
+/* ============================================================
+   迭代五：规则芯片 / 任务芯片 / 构筑编辑器
+   ============================================================ */
+
+.rule-chip {
+  background: rgba(212, 165, 87, 0.12);
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  font-size: 12px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.obj-chip {
+  background: rgba(92, 184, 122, 0.12);
+  border: 1px solid var(--ok);
+  color: var(--ok);
+  font-size: 12px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.obj-chip.is-done {
+  opacity: 0.9;
+}
+
+.obj-done-tag {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.build-editor {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(13, 16, 14, 0.5);
 }

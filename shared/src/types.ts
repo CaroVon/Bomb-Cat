@@ -180,6 +180,7 @@ export type ClientMessage =
       action: 'setDeck';
       deck: DeckDef | null;
     } // null = 经典卡组（仅房主）
+  | { action: 'setBuild'; cardIds: string[] } // 个人出战构筑（10 张，开局前）
   | {
       action: 'playCard';
       instanceId: string;
@@ -212,10 +213,13 @@ export type ServerMessage =
   | { action: 'promptDefuse'; deckCount: number } // 请选择爆炸猫放回位置
   | { action: 'error'; message: string }
   | { action: 'notice'; text: string } // 私密提示（如藏猫通知，不进公开日志语义）
+  | { action: 'objectiveDone'; defId: string; defName: string } // 秘密任务达成
+  | { action: 'objective'; defId: string; defName: string; description: string; targetName?: string } // 秘密任务下发
   | {
       action: 'gameEnd';
       winnerName: string;
       ranking: Array<{ sessionId: string; name: string; place: number }>;
+      objectives?: Array<{ sessionId: string; name: string; defId: string; defName: string; done: boolean }>;
     };
 
 /** 手牌中的单张实例（发给本人时带定义） */

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { autoReconnect, createRoom, joinRoom, quickMatch, snapPhase, useGame } from '../lib/game';
 import { loadIdentity } from '../lib/identity';
 import { fetchLeaderboard, loadCareer, type LeaderRow } from '../lib/stats';
+import { getBestStage, startRunStage } from '../lib/run';
 
 export default function LobbyPage() {
   const navigate = useNavigate();
@@ -140,6 +141,29 @@ export default function LobbyPage() {
             <button onClick={handleQuick} disabled={busy}>
               ⚡ 快速匹配
             </button>
+          </div>
+          <div className="h-row" style={{ marginTop: 10 }}>
+            <button
+              className="action-combo"
+              onClick={async () => {
+                setBusy(true);
+                setError('');
+                try {
+                  await startRunStage(1, []);
+                  navigate('/room');
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              disabled={busy}
+            >
+              🔥 无尽挑战（Roguelike）
+            </button>
+            {getBestStage() > 0 && (
+              <span className="tag">历史最佳：第 {getBestStage()} 关</span>
+            )}
           </div>
         </div>
 

@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { BUILTIN_CHARACTERS, MAX_PLAYERS, type DeckDef } from '@bombcat/shared';
 import { eachPlayer, sendAct, useGame } from '../lib/game';
 import { CLASSIC_DECK, loadDecks } from '../lib/decks';
+import { getActiveBuild, loadBuilds, setActiveBuildId } from '../lib/builds';
 
 export default function RoomPage() {
   const game = useGame();
@@ -10,6 +11,8 @@ export default function RoomPage() {
   const state = game.state;
   const decks = useMemo(loadDecks, []);
   const [deckId, setDeckId] = useState('classic');
+  const builds = useMemo(loadBuilds, []);
+  const [buildId, setBuildId] = useState(getActiveBuild()?.id ?? '');
 
   const myId = game.room?.sessionId ?? '';
 
@@ -23,6 +26,17 @@ export default function RoomPage() {
       navigate('/game');
     }
   }, [state?.phase, navigate]);
+
+  // 我的出战构筑：变更时提交/清除
+  useEffect(() => {
+    if (!game.room || state?.phase !== 'lobby') return;
+    const build = builds.find((b) => b.id === buildId);
+    setActiveBuildId(buildId);
+    if (build) {
+      sendAct({ action: 'setBuild', cardIds: build.cards });
+    }
+    // 无构筑时不清除服务端（开局才读；简化：只在有构筑时发送）
+  }, [buildId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 房主选卡组时同步给服务器
   useEffect(() => {
@@ -114,6 +128,29 @@ export default function RoomPage() {
               </div>
             </div>
           )}
+
+          {/* 我的出战构筑（所有人可选） */}
+          <div className="panel" style={{ marginTop: 16 }}>
+            <h4 style={{ margin: '0 0 8px' }}>🎴 我的出战构筑</h4>
+            <div className="h-row">
+              <select value={buildId} onChange={(e) => setBuildId(e.target.value)}>
+                <option value="">经典发牌（无构筑）</option>
+                {builds.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}（10 张：6 入起手 / 4 入公共堆）
+                  </option>
+                ))}
+              </select>
+              <Link to="/editor" className="muted" style={{ fontSize: 13, textDecoration: 'none' }}>
+                去编辑构筑 →
+              </Link>
+            </div>
+            {buildId && (
+              <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
+                ✅ 构筑已就绪：开局时 6 张随机进入你的起手，4 张洗入公共牌堆
+              </p>
+            )}
+          </div>
 
           {isHost ? (
             <button

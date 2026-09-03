@@ -3,7 +3,10 @@ import {
   MAX_PLAYERS,
   MIN_PLAYERS,
   NOPE_WINDOW_MS,
+  validateBuild,
   validateDeck,
+  WORLD_RULE_MAP,
+  BUILTIN_CARD_MAP,
   type ClientMessage,
   type DeckDef,
   type HandCard,
@@ -58,11 +61,21 @@ export class GameRoom extends Room<{ state: GameState }> {
   private botIds = new Set<string>();
   /** 机器人通过 peek 获得的牌堆顶记忆（不作弊读牌） */
   private botKnown: string[] | null = null;
-  /** 房间模式：{ bots: n } 人机练习；{ quick: true } 快速匹配 */
-  private roomMode: { bots?: number; quick?: boolean } = {};
+  /** 房间模式：{ bots: n } 人机练习；{ quick: true } 快速匹配；{ run, runBonuses, extraExploding } 无尽挑战 */
+  private roomMode: {
+    bots?: number;
+    quick?: boolean;
+    run?: boolean;
+    runBonuses?: string[];
+    extraExploding?: number;
+  } = {};
   private quickStarted = false;
+  /** 玩家个人构筑（sessionId -> 10 张 cardId） */
+  private pendingBuilds: Record<string, string[]> = {};
 
-  onCreate(options: { bots?: number; quick?: boolean } = {}): void {
+  onCreate(
+    options: { bots?: number; quick?: boolean; run?: boolean; runBonuses?: string[]; extraExploding?: number } = {},
+  ): void {
     const code = generateRoomCode();
     this.roomId = code;
     this.setState(new GameState());
@@ -300,8 +313,26 @@ export class GameRoom extends Room<{ state: GameState }> {
   private actAs(sid: string, message: ClientMessage): void {
     switch (message.action) {
       case 'startGame': {
-        const events = this.engine.startGame(sid, this.pendingDeck);
+        const events = this.engine.startGame(sid, this.pendingDeck, {
+          builds: this.pendingBuilds,
+          runBonuses: this.roomMode.run ? { [sid]: this.roomMode.runBonuses ?? [] } : undefined,
+          extraExploding: this.roomMode.run ? this.roomMode.extraExploding : undefined,
+        });
         this.process(events);
+        break;
+      }
+      case 'setBuild': {
+        if (this.engine.phase !== 'lobby') {
+          this.sendPrivate(sid, { action: 'error', message: '对局已开始' });
+          break;
+        }
+        const v = validateBuild(message.cardIds, this.buildCardPool());
+        if (!v.ok) {
+          this.sendPrivate(sid, { action: 'error', message: `构筑不合法：${v.error}` });
+          break;
+        }
+        this.pendingBuilds[sid] = message.cardIds;
+        this.sync();
         break;
       }
       case 'setCharacter': {
@@ -453,6 +484,7 @@ export class GameRoom extends Room<{ state: GameState }> {
                 place: places.get(p.sessionId) ?? this.engine.players.length,
               }))
               .sort((a, b) => a.place - b.place),
+            objectives: e.objectives,
           };
           this.broadcast('gameEnd', msg);
           break;
@@ -503,6 +535,15 @@ export class GameRoom extends Room<{ state: GameState }> {
     }
   }
 
+  /** 构筑可用卡池（内置 + 房主自定义） */
+  private buildCardPool(): Map<string, import('@bombcat/shared').CardDef> {
+    const pool = new Map(BUILTIN_CARD_MAP);
+    if (this.pendingDeck) {
+      for (const c of this.pendingDeck.customCards) pool.set(c.id, c);
+    }
+    return pool;
+  }
+
   private sync(): void {
     const s = this.state;
     const e = this.engine;
@@ -510,6 +551,12 @@ export class GameRoom extends Room<{ state: GameState }> {
     s.subPhase = e.subPhase;
     s.hostSessionId = e.hostSessionId;
     s.deckName = this.pendingDeck ? this.pendingDeck.name : e.phase === 'lobby' ? '经典卡组' : e.deckDef.name;
+    // World Rule
+    const rule = WORLD_RULE_MAP.get(e.worldRuleId);
+    s.worldRuleId = e.worldRuleId;
+    s.worldRuleName = rule?.name ?? '';
+    s.worldRuleDesc = rule?.description ?? '';
+    s.worldRuleEmoji = rule?.emoji ?? '';
     s.turnIndex = e.turnIndex;
     s.direction = e.direction;
     s.deckCount = e.deck.length;
@@ -566,7 +613,8 @@ export class GameRoom extends Room<{ state: GameState }> {
       ps.alive = ep.alive;
       ps.connected = ep.connected;
       ps.turnsLeft = ep.turnsLeft;
-      ps.isHost = ep.sessionId === e.hostSessionId;
+        ps.isHost = ep.sessionId === e.hostSessionId;
+        ps.buildReady = !!this.pendingBuilds[ep.sessionId];
 
       // 主动技能剩余次数
       const ch = e.characterMap.get(ep.characterId);

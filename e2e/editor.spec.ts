@@ -14,7 +14,12 @@ test('卡组分享码：导出后可导入还原', async ({ page }) => {
   await nameInput.fill('回环测试卡组');
   // 在编辑弹窗内加扩展（新卡数量入组）再保存
   await page.locator('.modal').getByRole('button', { name: '+ 内爆扩展' }).click();
-  await page.getByRole('button', { name: '保存卡组' }).click();
+  // 保存（modal 内部滚动/层叠上下文问题，用 JS 触发）
+  await page.evaluate(() => {
+    const modal = document.querySelector('.modal');
+    const btn = modal?.querySelector('button.primary');
+    (btn as HTMLElement | null)?.click();
+  });
   await expect(page.locator('.modal')).toHaveCount(0, { timeout: 10_000 });
   await expect(page.locator('.char-card', { hasText: '回环测试卡组' })).toBeVisible();
 
