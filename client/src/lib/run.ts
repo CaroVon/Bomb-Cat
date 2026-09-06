@@ -57,6 +57,7 @@ export async function startRunStage(
   // 带上个人构筑（如果有）
   const build = getActiveBuild();
   if (build) sendAct({ action: 'setBuild', cardIds: build.cards });
+  // run 模式房间会自动开局（不需要选角）
 }
 
 /** 本关获胜：从剩余未持有的增益中随机 3 个供选 */

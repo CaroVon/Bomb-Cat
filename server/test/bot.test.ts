@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Server } from 'colyseus';
-import { Client, type Room } from '@colyseus/sdk';
+import { Client } from '@colyseus/sdk';
 import type { ServerMessage } from '@bombcat/shared';
 
 const PORT = 3575;
@@ -32,7 +32,7 @@ afterAll(async () => {
 });
 
 describe('AI 机器人对战', () => {
-  it('人机练习：1 真人 + 2 bot 自动开局并打满整局到 gameEnd', async () => {
+  it('人机练习：1 真人 + 2 bot 补员后手动开局并打满整局到 gameEnd', async () => {
     const c = new Client(URL);
     const room = await c.create('game', { mode: 'guest', name: '训练员', bots: 2 });
 
@@ -40,13 +40,18 @@ describe('AI 机器人对战', () => {
       room.onMessage('gameEnd', (msg) => resolve(msg));
     });
 
-    // {bots:2} → 500ms 后补 bot 自动开局
+    // 人机练习：补 bot 但不自动开局，玩家手动开始
     await wait(1000);
-    expect(room.state.phase).toBe('playing');
-    // 3 名玩家（1 真人 + 2 bot）
     let count = 0;
     room.state.players.forEach(() => count++);
     expect(count).toBe(3);
+    expect(room.state.phase).toBe('lobby');
+
+    // 玩家选角色后手动开局
+    room.send('act', { action: 'setCharacter', characterId: 'oracle' });
+    room.send('act', { action: 'startGame' });
+    await wait(500);
+    expect(room.state.phase).toBe('playing');
 
     const end = await Promise.race([ended, wait(100_000).then(() => null)]);
     expect(end).not.toBeNull();
@@ -55,15 +60,20 @@ describe('AI 机器人对战', () => {
     room.leave(true);
   }, 110_000);
 
-  it('纯 bot 对战也能完整跑完（无真人干预）', async () => {
-    // 用 1 个"挂机真人"开 bot 局但从不行动：bot 之间互相打，
-    // 真人回合由 100ms 超时自动摸牌兜底，验证防挂机闭环
+  it('纯 bot 对战也能完整跑完（真人挂机由超时兜底）', async () => {
     const c = new Client(URL);
     const room = await c.create('game', { mode: 'guest', name: '挂机侠', bots: 2 });
 
     const ended = new Promise<void>((resolve) => {
       room.onMessage('gameEnd', () => resolve());
     });
+
+    // 人机练习需手动开局
+    await wait(1000);
+    room.send('act', { action: 'startGame' });
+    await wait(500);
+    expect(room.state.phase).toBe('playing');
+
     const end = await Promise.race([ended, wait(100_000).then(() => 'timeout')]);
     room.leave(true);
     expect(end).not.toBe('timeout');

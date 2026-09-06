@@ -312,7 +312,7 @@ select:focus {
 
 /* 尺寸三态 */
 .pcard.hand {
-  width: 128px;
+  width: calc(128px * var(--card-shrink, 1));
 }
 
 .pcard.stage {
@@ -1235,7 +1235,7 @@ button,
 @media (max-width: 900px) {
   /* 卡牌三态缩放 */
   .pcard.hand {
-    width: 92px;
+    width: calc(92px * var(--card-shrink, 1));
   }
 
   .pcard.hand .pcard-emoji {
@@ -1438,4 +1438,352 @@ button,
   border-radius: 12px;
   padding: 14px;
   background: rgba(13, 16, 14, 0.5);
+}
+
+/* ============================================================
+   RPG 式角色选择界面
+   ============================================================ */
+
+.char-select {
+  position: relative;
+  border-radius: var(--radius);
+  overflow: hidden;
+  padding: 20px;
+  min-height: 420px;
+}
+
+.char-select-bg {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 30% 40%, var(--theme, #8f978d)18, transparent 60%),
+    linear-gradient(160deg, rgba(22, 27, 23, 0.95), rgba(13, 16, 14, 0.98));
+  transition: background 0.5s ease;
+  pointer-events: none;
+}
+
+.char-select-main {
+  position: relative;
+  display: flex;
+  gap: 28px;
+  align-items: flex-start;
+  z-index: 1;
+}
+
+/* 大卡 */
+.char-select-card-scene {
+  perspective: 800px;
+  flex-shrink: 0;
+}
+
+.char-select-card {
+  width: 200px;
+  aspect-ratio: 3 / 4.2;
+  border-radius: 16px;
+  border: 2px solid var(--theme, var(--border));
+  background: var(--bg-card);
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  transition: box-shadow 0.4s ease;
+}
+
+.char-select-card:hover {
+  transform: translateY(-6px) rotateX(3deg) rotateY(-3deg);
+}
+
+.char-portrait {
+  flex: 1;
+  background-size: cover;
+  background-position: center top;
+  min-height: 0;
+}
+
+.char-card-info {
+  padding: 10px 14px;
+  background: linear-gradient(to top, rgba(5, 8, 5, 0.92), transparent);
+  text-align: center;
+}
+
+.char-name {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  color: #f5efdd;
+}
+
+.char-title {
+  font-size: 12px;
+  color: var(--theme, var(--text-dim));
+  font-style: italic;
+}
+
+.char-selected-check {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--gold);
+  color: #1c1508;
+  font-weight: 900;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 12px rgba(212, 165, 87, 0.5);
+}
+
+/* 详情侧栏 */
+.char-select-detail {
+  flex: 1;
+  min-width: 0;
+}
+
+.detail-name {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 800;
+  color: #f5efdd;
+  letter-spacing: 1px;
+}
+
+.detail-title {
+  font-size: 14px;
+  color: var(--theme, var(--text-dim));
+  font-style: italic;
+  margin-top: 2px;
+}
+
+.role-badge {
+  display: inline-block;
+  padding: 3px 12px;
+  border-radius: 999px;
+  border: 1px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.difficulty-dots {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.difficulty-dots .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+}
+
+.difficulty-dots .dot.is-on {
+  background: var(--theme, var(--gold));
+  border-color: transparent;
+}
+
+.skill-panel {
+  background: rgba(13, 16, 14, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin: 12px 0;
+}
+
+.skill-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.skill-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.char-lore {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-style: italic;
+  line-height: 1.6;
+  margin: 10px 0 16px;
+  border-left: 2px solid var(--theme, var(--border));
+  padding-left: 12px;
+}
+
+.char-confirm {
+  padding: 12px 28px;
+  font-size: 16px;
+  font-weight: 800;
+  border-radius: 12px;
+  border: 2px;
+  background: rgba(13, 16, 14, 0.8);
+  color: var(--text);
+  animation: confirm-breathe 2s ease-in-out infinite;
+}
+
+.char-confirm.is-locked {
+  background: var(--gold);
+  color: #1c1508;
+  animation: confirm-pop 0.5s ease-out;
+}
+
+@keyframes confirm-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50% { box-shadow: 0 0 18px 4px var(--theme, rgba(212,165,87,0.3)); }
+}
+
+@keyframes confirm-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+/* 底部小卡条 */
+.char-select-strip {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+  flex-wrap: wrap;
+  z-index: 1;
+}
+
+.char-mini {
+  width: 72px;
+  border-radius: 10px;
+  border: 2px solid var(--border);
+  background: var(--bg-card);
+  cursor: pointer;
+  overflow: hidden;
+  position: relative;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.char-mini:hover,
+.char-mini.is-hovered {
+  transform: translateY(-4px);
+}
+
+.char-mini.is-selected {
+  border-width: 2px;
+}
+
+.char-mini-portrait {
+  width: 100%;
+  aspect-ratio: 3 / 3.4;
+  background-size: cover;
+  background-position: center top;
+}
+
+.char-mini-name {
+  display: block;
+  font-size: 10px;
+  text-align: center;
+  padding: 3px 2px;
+  color: var(--text);
+  font-weight: 600;
+  background: rgba(5, 8, 5, 0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.char-mini-check {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--gold);
+  color: #1c1508;
+  font-size: 11px;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ============================================================
+   按钮微交互（M3 参数：hover 150ms scale 1.04 / active 60ms scale 0.96）
+   ============================================================ */
+
+button {
+  transition: transform 0.15s cubic-bezier(0.2, 0, 0, 1),
+              box-shadow 0.15s cubic-bezier(0.2, 0, 0, 1),
+              filter 0.15s;
+  will-change: transform;
+}
+
+button:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.96);
+  transition-duration: 60ms;
+}
+
+/* ============================================================
+   胜利标题 shimmer
+   ============================================================ */
+
+.shimmer-text {
+  background: linear-gradient(110deg, #f5d67b 20%, #fff9e0 40%, #f5d67b 60%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: text-shine 2.5s linear infinite;
+}
+
+@keyframes text-shine {
+  to { background-position: -200% 0; }
+}
+
+/* ============================================================
+   回合超时红色 vignette
+   ============================================================ */
+
+.turn-vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 150;
+  background: radial-gradient(ellipse at center, transparent 60%, rgba(224, 82, 82, 0.15) 100%);
+  animation: vignette-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes vignette-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+/* ============================================================
+   技能触发反馈标签
+   ============================================================ */
+
+.skill-flash {
+  position: fixed;
+  top: 32%;
+  left: 50%;
+  translate: -50%;
+  z-index: 220;
+  padding: 8px 20px;
+  border-radius: 999px;
+  background: rgba(13, 16, 14, 0.9);
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  font-weight: 800;
+  font-size: 15px;
+  pointer-events: none;
+  box-shadow: 0 0 20px rgba(212, 165, 87, 0.3);
 }

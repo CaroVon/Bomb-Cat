@@ -4,6 +4,7 @@ import { autoReconnect, createRoom, joinRoom, quickMatch, snapPhase, useGame } f
 import { loadIdentity } from '../lib/identity';
 import { fetchLeaderboard, loadCareer, type LeaderRow } from '../lib/stats';
 import { getBestStage, startRunStage } from '../lib/run';
+import { AnimatedNumber } from '../components/AnimatedNumber';
 
 export default function LobbyPage() {
   const navigate = useNavigate();
@@ -226,11 +227,11 @@ function CareerPanel() {
       <h3 style={{ marginTop: 0, marginBottom: 10 }}>📊 我的战绩</h3>
       <div className="h-row" style={{ gap: 22 }}>
         <span>
-          <strong style={{ fontSize: 22, color: 'var(--gold)' }}>{career.points}</strong>
+          <strong style={{ fontSize: 22, color: 'var(--gold)' }}><AnimatedNumber value={career.points} /></strong>
           <span className="muted" style={{ fontSize: 12 }}> 积分</span>
         </span>
         <span>
-          <strong style={{ fontSize: 22 }}>{career.games}</strong>
+          <strong style={{ fontSize: 22 }}><AnimatedNumber value={career.games} /></strong>
           <span className="muted" style={{ fontSize: 12 }}> 局</span>
         </span>
         <span>

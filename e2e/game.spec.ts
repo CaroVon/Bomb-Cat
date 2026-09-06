@@ -67,13 +67,19 @@ test('双人联机全流程：建房→加入→开局→出牌→对手看到',
   await ctxB.close();
 });
 
-test('人机练习：单按钮即刻开局', async ({ browser }) => {
+test('人机练习：单按钮开局（需手动点开始）', async ({ browser }) => {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   await loginAsGuest(page, 'E2E练习生');
   await page.getByRole('button', { name: /人机练习/ }).click();
 
-  // 自动开局（~1s 内补 2 bot），进入牌桌
+  // 补 bot 后进入等待室（可选角色），玩家手动点开始
+  await expect(page.getByText('等待室')).toBeVisible({ timeout: 10_000 });
+  // 选一个角色
+  await page.locator('.char-mini').nth(1).click();
+  await page.getByRole('button', { name: /开始游戏/ }).click();
+
+  // 进入牌桌
   await expect(page.locator('.handfan .pcard').first()).toBeVisible({ timeout: 20_000 });
   // 席位含 AI 玩家
   await expect(page.locator('.seat-v2', { hasText: 'AI·' }).first()).toBeVisible();

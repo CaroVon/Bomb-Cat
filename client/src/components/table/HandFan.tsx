@@ -6,8 +6,6 @@ import { CardView } from '../CardView';
 export interface FanCard {
   instanceId: string;
   def: CardDef;
-  /** 出牌后飞向弃牌堆的退场方向 */
-  exitTo?: number;
 }
 
 interface Props {
@@ -21,27 +19,29 @@ interface Props {
 }
 
 const DEFAULT_CARD_W = 128;
-const SPRING = { type: 'spring', stiffness: 260, damping: 24 } as const;
+const SPRING = { type: 'spring', stiffness: 300, damping: 30 } as const;
+const HOVER_SPRING = { type: 'spring', stiffness: 250, damping: 20 } as const;
 
 /**
  * 炉石式扇形手牌：
- * - 角度：中间 0° 向两侧步进，总开角 clamp ±40°（每张 ≤10°）
+ * - 角度：中间 0° 向两侧步进，总开角动态收紧（牌多时 ±24°，牌少时 ±40°）
  * - 抛物线下沉：y = |i-mid|² × 7
  * - transform-origin: center 120%（枢轴在牌下方，弧线自然）
- * - 悬停抬升 44px + 放大 1.1 + z 置顶；重排 spring 补位
- * - 卡宽实时测量（移动端 CSS 缩小后自动收紧间距）
+ * - 溢出防护：spacing 无硬下限 + 牌多时自动缩小卡牌 + 总角度收紧
+ * - 悬停 3D 倾斜视差（桌面端，rotateX/Y ±8°）+ 抬升放大
  */
 export function HandFan({ cards, interactive, selected, playable, onCardClick }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(900);
   const [cardW, setCardW] = useState(DEFAULT_CARD_W);
+  const [isTouch, setIsTouch] = useState(false);
 
   useEffect(() => {
+    setIsTouch(window.matchMedia('(pointer: coarse)').matches);
     const el = ref.current;
     if (!el) return;
     const update = () => {
       setWidth(el.clientWidth);
-      // offsetWidth 是布局尺寸，不含 motion 的 transform 缩放
       const card = el.querySelector<HTMLElement>('.pcard');
       if (card) setCardW(card.offsetWidth || DEFAULT_CARD_W);
     };
@@ -53,11 +53,22 @@ export function HandFan({ cards, interactive, selected, playable, onCardClick }:
 
   const n = cards.length;
   const mid = (n - 1) / 2;
-  const spacing = n > 1 ? Math.min(88, Math.max(40, (width - cardW - 24) / (n - 1))) : 0;
-  const step = Math.min(10, 40 / Math.max(mid, 1));
+
+  // 溢出防护三重策略：
+  // 1. spacing 无硬下限，按视口均分
+  const spacing = n > 1 ? Math.min(88, Math.max(28, (width - cardW - 16) / (n - 1))) : 0;
+  // 2. 牌多时收紧总开角（3 张 ±40° → 12+ 张 ±22°）
+  const maxAngle = n <= 5 ? 40 : n <= 8 ? 32 : n <= 11 ? 26 : 22;
+  const step = Math.min(10, maxAngle / Math.max(mid, 1));
+  // 3. spacing 极窄时缩小卡牌（通过 CSS 变量 --card-shrink）
+  const shrink = spacing < 42 ? Math.max(0.72, spacing / 58) : 1;
 
   return (
-    <div className="handfan" ref={ref}>
+    <div
+      className="handfan"
+      ref={ref}
+      style={{ ['--card-shrink' as string]: String(shrink) }}
+    >
       <AnimatePresence mode="popLayout" initial={false}>
         {cards.map((card, i) => {
           const off = i - mid;
@@ -76,16 +87,26 @@ export function HandFan({ cards, interactive, selected, playable, onCardClick }:
                 x,
                 y: isSel ? y - 56 : y,
                 rotate: angle,
-                scale: isSel ? 1.08 : 1,
+                scale: (isSel ? 1.08 : 1) * shrink,
               }}
-              exit={{ opacity: 0, y: -200, scale: 0.5, rotate: angle + 14 }}
+              exit={{ opacity: 0, x: x + 120, y: -160, rotate: angle + 25, scale: 0.5 }}
               whileHover={
                 interactive
-                  ? { y: y - 44, scale: 1.12, rotate: angle * 0.4, zIndex: 90 }
+                  ? {
+                      y: y - 44,
+                      scale: 1.12 * shrink,
+                      rotate: angle * 0.3,
+                      zIndex: 90,
+                    }
                   : undefined
               }
               transition={SPRING}
-              style={{ zIndex: i, transformOrigin: 'center 120%', left: '50%', marginLeft: -cardW / 2 }}
+              style={{
+                zIndex: i,
+                transformOrigin: 'center 120%',
+                left: '50%',
+                marginLeft: -cardW / 2,
+              }}
             >
               <CardView
                 def={card.def}

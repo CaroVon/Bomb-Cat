@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { AnimatePresence, motion } from 'motion/react';
 import { BUILTIN_CHARACTERS, RUN_BONUS_MAP, type CardDef, type HandCard } from '@bombcat/shared';
 import {
   buildCardMap,
@@ -193,6 +194,22 @@ export default function GamePage() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game.lastEmote?.id]);
+
+  // 技能触发反馈标签（预言家看牌/铁壁挡偷/果奔藏猫 → 中央光效 2s）
+  const [skillFlash, setSkillFlash] = useState<{ id: number; text: string } | null>(null);
+  const seenNotice = useRef(0);
+  useEffect(() => {
+    const notices = game.toast;
+    if (!notices) return;
+    const text = notices.text;
+    if (text.includes('果奔猫生效') || text.includes('铁壁') || text.includes('回响')) {
+      setSkillFlash({ id: Date.now(), text: text.split('。')[0] ?? text });
+      sfx('skill');
+      const t = setTimeout(() => setSkillFlash(null), 2000);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game.toast?.id]);
 
   // 出牌音效
   useEffect(() => {
@@ -402,6 +419,25 @@ export default function GamePage() {
   return (
     <div className={`table-root ${boom ? 'is-shaking' : ''}`}>
       <FlashOverlay boomKey={boom?.key ?? 0} />
+      {/* 回合超时红色 vignette（最后 10 秒） */}
+      {isMyTurn && turnRemaining != null && turnRemaining <= 10 && me?.alive && state.phase === 'playing' && (
+        <div className="turn-vignette" />
+      )}
+      {/* 技能触发反馈 */}
+      <AnimatePresence>
+        {skillFlash && (
+          <motion.div
+            key={skillFlash.id}
+            className="skill-flash"
+            initial={{ opacity: 0, scale: 0.8, y: 16 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: -8 }}
+            transition={{ type: 'spring', stiffness: 320, damping: 24 }}
+          >
+            {skillFlash.text}
+          </motion.div>
+        )}
+      </AnimatePresence>
       <TurnBanner text={banner?.text ?? null} gold={banner?.gold ?? false} />
       <BoomBanner name={boom?.name ?? null} />
 
@@ -712,7 +748,7 @@ export default function GamePage() {
       <Modal open={!!game.gameEnd}>
         {game.gameEnd && (
           <>
-            <h3 style={{ marginTop: 0 }}>🏆 {game.gameEnd.winnerName} 获胜！</h3>
+            <h3 style={{ marginTop: 0 }}><span className="shimmer-text">🏆 {game.gameEnd.winnerName} 获胜！</span></h3>
             <div style={{ lineHeight: 2.2 }}>
               {game.gameEnd.ranking.map((r) => (
                 <div key={r.sessionId} className="h-row" style={{ justifyContent: 'space-between', maxWidth: 380 }}>

@@ -1,5 +1,75 @@
 import type { CharacterDef } from './types';
 
+/** 角色职责 → 主题色/边框光晕 */
+export type CharacterRole = 'control' | 'support' | 'aggressive' | 'trickster';
+
+export const ROLE_LABEL: Record<CharacterRole, string> = {
+  control: '控制',
+  support: '辅助',
+  aggressive: '进攻',
+  trickster: '诡诈',
+};
+
+export const ROLE_COLOR: Record<CharacterRole, string> = {
+  control: '#4a90c2', // 钢蓝
+  support: '#5cb87a', // 翠绿
+  aggressive: '#e05252', // 赤红
+  trickster: '#a335ee', // 暗紫
+};
+
+export interface CharacterRPG {
+  role: CharacterRole;
+  themeColor: string;
+  difficulty: 1 | 2 | 3;
+  lore: string;
+}
+
+/** RPG 属性扩展表（按 id 查找） */
+export const CHARACTER_RPG: Record<string, CharacterRPG> = {
+  none: {
+    role: 'support',
+    themeColor: '#8f978d',
+    difficulty: 1,
+    lore: '一个路过的普通人，在猫与爆炸的世界里寻找下一顿饭。',
+  },
+  'echo-mage': {
+    role: 'trickster',
+    themeColor: '#8b5cf6',
+    difficulty: 2,
+    lore: '曾因过度否认魔法议会的提案而被放逐，从此他的声音总能在关键时刻回响。',
+  },
+  oracle: {
+    role: 'control',
+    themeColor: '#4a90c2',
+    difficulty: 1,
+    lore: '据说她能看见三秒钟后的未来——但她只用来决定午饭吃什么。',
+  },
+  knight: {
+    role: 'support',
+    themeColor: '#5cb87a',
+    difficulty: 1,
+    lore: '铁壁骑士团最后的成员，他的盾牌上刻着"仅限一次"。',
+  },
+  'phantom-thief': {
+    role: 'trickster',
+    themeColor: '#a335ee',
+    difficulty: 3,
+    lore: '只偷他认为是"命运注定属于他"的东西——恰好你的那张牌也是。',
+  },
+  alchemist: {
+    role: 'control',
+    themeColor: '#d4a557',
+    difficulty: 2,
+    lore: '炼金术的第一法则是等价交换，第二法则是先偷再换。',
+  },
+  'lucky-cat': {
+    role: 'support',
+    themeColor: '#f59e0b',
+    difficulty: 1,
+    lore: '传说摸到它的肚子会获得好运，但没人敢在爆炸猫的世界里验证。',
+  },
+};
+
 /** 预置角色：每个角色由 1 个技能原型数据定义，引擎按原型结算。 */
 export const BUILTIN_CHARACTERS: CharacterDef[] = [
   {

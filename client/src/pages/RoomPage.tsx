@@ -4,6 +4,7 @@ import { BUILTIN_CHARACTERS, MAX_PLAYERS, type DeckDef } from '@bombcat/shared';
 import { eachPlayer, sendAct, useGame } from '../lib/game';
 import { CLASSIC_DECK, loadDecks } from '../lib/decks';
 import { getActiveBuild, loadBuilds, setActiveBuildId } from '../lib/builds';
+import { CharacterSelect } from '../components/CharacterSelect';
 
 export default function RoomPage() {
   const game = useGame();
@@ -169,27 +170,11 @@ export default function RoomPage() {
         </div>
 
         <div className="panel">
-          <h4 style={{ margin: '0 0 4px' }}>选择你的角色</h4>
-          <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-            角色技能在对局中生效，开局后不可更换
-          </p>
-          <div className="grid">
-            {BUILTIN_CHARACTERS.map((c) => {
-              const selected = players.find((p) => p.sessionId === myId)?.characterId === c.id;
-              return (
-                <div
-                  key={c.id}
-                  className={`char-card ${selected ? 'selected' : ''}`}
-                  onClick={() => sendAct({ action: 'setCharacter', characterId: c.id })}
-                >
-                  <span className="emoji">{c.emoji}</span>
-                  <h4>{c.name}</h4>
-                  <div className="title">{c.title}</div>
-                  <p>{c.description}</p>
-                </div>
-              );
-            })}
-          </div>
+          <h4 style={{ margin: '0 0 8px' }}>选择你的角色</h4>
+          <CharacterSelect
+            selectedId={players.find((p) => p.sessionId === myId)?.characterId ?? 'none'}
+            onSelect={(id) => sendAct({ action: 'setCharacter', characterId: id })}
+          />
         </div>
       </div>
     </div>

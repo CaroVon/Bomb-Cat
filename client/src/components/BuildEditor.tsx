@@ -42,6 +42,7 @@ export function BuildSection() {
     if (!editing) return;
     setError('');
     setEditing((prev) => {
+      if (!prev) return prev;
       const same = prev.filter((x) => x === id).length;
       if (same >= BUILD_MAX_COPIES) return prev;
       if (prev.length >= BUILD_SIZE) return prev;

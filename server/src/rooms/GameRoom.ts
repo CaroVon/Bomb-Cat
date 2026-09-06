@@ -100,12 +100,19 @@ export class GameRoom extends Room<{ state: GameState }> {
       this.broadcast('emote', { sessionId: client.sessionId, name: p.name, emoji });
     });
 
-    // 人机练习：稍候补 bot 并自动开局
-    if (this.roomMode.bots && this.roomMode.bots > 0) {
+    // 人机练习：补 bot 但不自动开局（玩家需要选角色/构筑后手动开始）
+    if (this.roomMode.bots && this.roomMode.bots > 0 && this.roomMode.run) {
+      // 无尽挑战：roguelike 不需要选角，自动开局
       this.clock.setTimeout(() => {
         if (this.engine.phase !== 'lobby') return;
         this.addBots(this.roomMode.bots!);
         this.autoStart();
+      }, 500);
+    } else if (this.roomMode.bots && this.roomMode.bots > 0) {
+      // 人机练习：只补 bot，等待玩家手动开始
+      this.clock.setTimeout(() => {
+        if (this.engine.phase !== 'lobby') return;
+        this.addBots(this.roomMode.bots!);
       }, 500);
     } else if (this.roomMode.quick) {
       // 快速匹配：15 秒内凑不满 2 人则补 bot 开局
