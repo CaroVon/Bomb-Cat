@@ -1142,7 +1142,11 @@ export class GameEngine {
 
     const skill = this.skillOf(player, 'active');
     if (!skill || skill.id !== input.skillId) return this.invalid(sessionId, '你没有这个主动技能');
-    if (skill.effect.kind !== 'activeSteal' && skill.effect.kind !== 'activeRecycle') {
+    if (
+      skill.effect.kind !== 'activeSteal' &&
+      skill.effect.kind !== 'activeRecycle' &&
+      skill.effect.kind !== 'activeSwap'
+    ) {
       return this.invalid(sessionId, '该技能不是主动技能');
     }
     const skillEffect = skill.effect;
@@ -1152,8 +1156,12 @@ export class GameEngine {
     if (st.used >= skillEffect.uses) return this.invalid(sessionId, '技能次数已用完');
 
     const cost = input.costInstanceIds ?? [];
-    if (cost.length !== skillEffect.costCards) {
-      return this.invalid(sessionId, `需要弃置 ${skillEffect.costCards} 张牌作为代价`);
+    const requiredCost = skillEffect.kind === 'activeSwap' ? 0 : (skillEffect as { costCards?: number }).costCards ?? 0;
+    if (cost.length !== requiredCost) {
+      if (requiredCost > 0) {
+        return this.invalid(sessionId, `需要弃置 ${requiredCost} 张牌作为代价`);
+      }
+      // activeSwap 不需要代价牌
     }
     const costInstances: CardInstance[] = [];
     for (const id of cost) {
@@ -1204,6 +1212,27 @@ export class GameEngine {
       st.used++;
       this.ev(events, { type: 'hand', sessionId });
       this.log(events, `${player.name} 发动「${skill.name}」，回收了弃牌堆顶的【${this.defOf(recycled!).name}】⚗️`);
+      return events;
+    }
+
+    if (skillEffect.kind === 'activeSwap') {
+      const target = this.players.find((p) => p.sessionId === input.targetSessionId);
+      if (!target || !target.alive || target.sessionId === sessionId) {
+        return this.invalid(sessionId, '需要选择一名其他存活玩家');
+      }
+      // 交换全部手牌
+      const tmp = player.hand;
+      player.hand = target.hand;
+      target.hand = tmp;
+      st.used++;
+      this.ev(events, { type: 'hand', sessionId });
+      this.ev(events, { type: 'hand', sessionId: target.sessionId });
+      this.log(
+        events,
+        `${player.name} 发动「${skill.name}」，与 ${target.name} 交换了全部手牌 ⚓（${player.hand.length} 张 ↔ ${target.hand.length} 张）`,
+      );
+      // 回合立即结束
+      this.finishTurn(events);
       return events;
     }
 

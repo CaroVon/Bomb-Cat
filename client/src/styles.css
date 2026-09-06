@@ -448,14 +448,223 @@ select:focus {
   mix-blend-mode: screen;
 }
 
-/* ---------------- 对手席 ---------------- */
+/* ---------------- 对手席（桌面分布） ---------------- */
 
-.opponents-row {
+.table-opponents {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.table-seat {
+  position: absolute;
+  transform: translate(-50%, -50%);
   display: flex;
-  gap: 10px;
-  padding: 14px 18px 6px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: auto;
+  transition: opacity 0.3s ease;
+  min-width: 80px;
+}
+
+.table-seat.is-dead {
+  opacity: 0.4;
+  filter: grayscale(0.8);
+}
+
+.table-seat.is-bounced .table-seat-portrait {
+  animation: seat-bounce 0.3s ease-out;
+}
+
+/* 立绘框 */
+.table-seat-portrait {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  border: 2px solid var(--theme, var(--border));
+  overflow: visible;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  transition: box-shadow 0.3s ease;
+}
+
+.table-seat.is-current .table-seat-portrait {
+  box-shadow: 0 0 16px var(--theme), 0 4px 12px rgba(0, 0, 0, 0.35);
+  animation: seat-current-breathe 1.8s ease-in-out infinite;
+}
+
+@keyframes seat-current-breathe {
+  0%, 100% { box-shadow: 0 0 10px var(--theme), 0 4px 12px rgba(0,0,0,.35); }
+  50% { box-shadow: 0 0 24px var(--theme), 0 4px 12px rgba(0,0,0,.35); }
+}
+
+.table-seat-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 10px;
+  background-size: cover;
+  background-position: center top;
+}
+
+.table-seat-dead-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
   justify-content: center;
+  font-size: 28px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 10px;
+}
+
+.table-seat-turn-glow {
+  position: absolute;
+  inset: -4px;
+  border-radius: 14px;
+  border: 2px solid var(--gold);
+  animation: glow-pulse 1.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.table-seat-timer {
+  position: absolute;
+  bottom: -6px;
+  right: -8px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(13, 16, 14, 0.92);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.table-seat-timer.is-urgent {
+  border-color: var(--danger);
+  color: #ffb3b3;
+  animation: timer-blink 0.8s ease-in-out infinite;
+}
+
+/* 信息条 */
+.table-seat-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  background: rgba(13, 16, 14, 0.85);
+  border-radius: 8px;
+  padding: 3px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.table-seat-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table-seat-char {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.table-seat-meta {
+  display: flex;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.table-seat-combo {
+  color: var(--gold);
+  font-weight: 700;
+}
+
+.table-seat-out {
+  color: var(--danger);
+}
+
+.table-seat-offline {
+  color: var(--danger);
+}
+
+.table-seat-emote {
+  position: absolute;
+  top: -36px;
+  left: 50%;
+  translate: -50%;
+  font-size: 26px;
+  background: rgba(13, 16, 14, 0.85);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-2);
+  pointer-events: none;
+  z-index: 20;
+}
+
+/* ---------------- 我的角色展示 ---------------- */
+
+.my-char-badge {
+  position: absolute;
+  left: 12px;
+  bottom: 210px;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(13, 16, 14, 0.85);
+  border-radius: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--theme, var(--border));
+}
+
+.my-char-portrait {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  background-size: cover;
+  background-position: center top;
+  border: 2px solid var(--theme, var(--border));
+}
+
+.my-char-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.my-char-name {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--theme, var(--text));
+}
+
+.my-char-player {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.my-char-dead {
+  font-size: 11px;
+  color: var(--danger);
+  font-weight: 700;
 }
 
 .seat-v2 {
@@ -727,6 +936,8 @@ select:focus {
   gap: 18px;
   padding: 2px 16px;
   font-size: 13px;
+  position: relative;
+  z-index: 20;
 }
 
 .status-turn {
@@ -746,6 +957,8 @@ select:focus {
   gap: 12px;
   padding: 8px 16px 4px;
   flex-wrap: wrap;
+  position: relative;
+  z-index: 20;
 }
 
 .action-main {
@@ -798,41 +1011,48 @@ select:focus {
   padding: 6px 12px;
 }
 
-/* ---------------- 手牌区 ---------------- */
+/* ---------------- 手牌区（水平排布） ---------------- */
 
 .handzone {
-  padding: 0 12px 8px;
+  padding: 0 8px 6px;
+  height: 200px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden; /* 防止手牌区向上扩展遮挡行动条 */
+  position: relative;
+  z-index: 5;
 }
 
 .handfan {
-  position: relative;
-  height: 210px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  -ms-overflow-style: none;
+}
+
+.handfan::-webkit-scrollbar {
+  height: 4px;
+}
+
+.handfan::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.handfan::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
 }
 
 .handfan > div {
-  position: absolute;
-  bottom: 6px;
-  left: 50%;
-  margin-left: -64px;
-  /* 宽命中区：重叠卡牌的悬停判定提前（炉石手感） */
-}
-
-.handfan > div::before {
-  content: '';
-  position: absolute;
-  top: -20px;
-  bottom: -30px;
-  left: -22px;
-  right: -22px;
+  flex-shrink: 0;
 }
 
 .handfan-empty {
   color: var(--text-dim);
   font-size: 13px;
-  align-self: center;
+  margin: auto;
 }
 
 /* ---------------- 全屏演出 ---------------- */

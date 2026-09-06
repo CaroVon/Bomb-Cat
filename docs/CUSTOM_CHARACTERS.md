@@ -60,24 +60,24 @@
 
 ```json
 {
-  "id": "my-character",
-  "name": "我的角色",
-  "title": "一个很酷的称号",
-  "emoji": "🌟",
-  "role": "control",
+  "id": "Voyage",
+  "name": "Voyage",
+  "title": "远航船长",
+  "emoji": "⚓",
+  "role": "trickster",
   "themeColor": "#4a90c2",
   "difficulty": 2,
-  "lore": "曾经是宇宙中最强的星灵，因为一场赌局降临到了这个猫与爆炸的世界。",
-  "portrait": "my-character.jpg",
+  "lore": "下一次航程也许是在月球。“孩子们，还有谁没有收到明信片吗！”",
+  "portrait": "D:\dev\bombcat\client\public\assets\characters\Voyage.jpg",
   "skills": [
     {
-      "id": "my-skill",
-      "name": "星之预兆",
-      "description": "每个回合开始时，私密查看牌堆顶 2 张牌。",
-      "trigger": "turnStart",
+      "id": "voyage-skill",
+      "name": "大海胸怀无量",
+      "description": "选择任意一名玩家，和对方交换全部手牌，回合结束。每局一次。",
+      "trigger": "active",
       "effect": {
-        "kind": "peekAtTurnStart",
-        "count": 2
+        "kind": "None",
+        "uses": 1
       }
     }
   ]

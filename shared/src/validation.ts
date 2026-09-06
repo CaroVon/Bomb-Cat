@@ -185,6 +185,11 @@ export function validateSkill(skill: SkillDef, errors: string[]): boolean {
         return fail(errors, `${skill.id}: uses 必须在 1-3`);
       }
       break;
+    case 'activeSwap':
+      if ((effect.uses ?? 0) < 1 || (effect.uses ?? 0) > 3) {
+        return fail(errors, `${skill.id}: uses 必须在 1-3`);
+      }
+      break;
     case 'startWithSkip':
       if ((effect.count ?? 0) < 1 || (effect.count ?? 0) > 2) {
         return fail(errors, `${skill.id}: count 必须在 1-2`);

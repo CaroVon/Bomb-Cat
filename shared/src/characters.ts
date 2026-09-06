@@ -68,6 +68,12 @@ export const CHARACTER_RPG: Record<string, CharacterRPG> = {
     difficulty: 1,
     lore: '传说摸到它的肚子会获得好运，但没人敢在爆炸猫的世界里验证。',
   },
+  voyage: {
+    role: 'trickster',
+    themeColor: '#4a90c2',
+    difficulty: 2,
+    lore: '下一次航程也许是在月球。孩子们，还有谁没有收到明信片吗！',
+  },
 };
 
 /** 预置角色：每个角色由 1 个技能原型数据定义，引擎按原型结算。 */
@@ -173,6 +179,22 @@ export const BUILTIN_CHARACTERS: CharacterDef[] = [
         description: '开局额外获得 1 张跳过。',
         trigger: 'gameStart',
         effect: { kind: 'startWithSkip', count: 1 },
+      },
+    ],
+  },
+  {
+    id: 'voyage',
+    name: 'Voyage',
+    title: '远航船长',
+    emoji: '⚓',
+    description: '主动技（每局 1 次）：选择任意一名玩家，和对方交换全部手牌，回合立即结束。下一次航程也许是在月球。',
+    skills: [
+      {
+        id: 'voyage-skill',
+        name: '大海胸怀无量',
+        description: '选择任意一名玩家，和对方交换全部手牌，回合立即结束。每局一次。',
+        trigger: 'active',
+        effect: { kind: 'activeSwap', uses: 1 },
       },
     ],
   },

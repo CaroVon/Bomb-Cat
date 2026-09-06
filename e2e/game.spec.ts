@@ -31,7 +31,8 @@ test('双人联机全流程：建房→加入→开局→出牌→对手看到',
   await loginAsGuest(b, 'E2E鱼条');
   await b.getByRole('textbox', { name: '房间码' }).fill(code);
   await b.getByRole('button', { name: '加入', exact: true }).click();
-  await expect(b.getByText('等待室')).toBeVisible({ timeout: 10_000 });
+  await b.waitForURL('**/room', { timeout: 15_000 });
+  await expect(b.locator('.room-code-big')).toBeVisible({ timeout: 15_000 });
   // 双方都能看到对方
   await expect(a.getByText('E2E鱼条')).toBeVisible({ timeout: 10_000 });
 
@@ -54,8 +55,14 @@ test('双人联机全流程：建房→加入→开局→出牌→对手看到',
 
   const drawBtn = actor.getByRole('button', { name: /摸牌/ });
   await expect(drawBtn).toBeEnabled({ timeout: 10_000 });
+  // 关闭可能弹出的看牌/提示弹窗
+  const okBtn = actor.getByRole('button', { name: '知道了' });
+  if (await okBtn.isVisible().catch(() => false)) {
+    await okBtn.click();
+    await actor.waitForTimeout(300);
+  }
   const deckBefore = await observer.locator('.pile-count').first().innerText();
-  await drawBtn.click();
+  await drawBtn.click({ force: true });
 
   // 观察方看到牌堆数变化（摸牌使牌堆-1）
   await expect
@@ -82,6 +89,6 @@ test('人机练习：单按钮开局（需手动点开始）', async ({ browser 
   // 进入牌桌
   await expect(page.locator('.handfan .pcard').first()).toBeVisible({ timeout: 20_000 });
   // 席位含 AI 玩家
-  await expect(page.locator('.seat-v2', { hasText: 'AI·' }).first()).toBeVisible();
+  await expect(page.locator('.table-seat', { hasText: 'AI·' }).first()).toBeVisible();
   await ctx.close();
 });

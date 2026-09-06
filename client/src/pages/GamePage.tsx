@@ -25,7 +25,8 @@ import { recordMatch } from '../lib/stats';
 import { advanceStage, endRun, loadRun, offerBonuses } from '../lib/run';
 import { CardView, setSkinMap } from '../components/CardView';
 import Modal from '../components/Modal';
-import { Seat, type SeatData } from '../components/table/Seat';
+import { TableSeat, getSeatPositions, type TableSeatData } from '../components/table/TableSeat';
+import { CHARACTER_RPG } from '@bombcat/shared';
 import { HandFan, type FanCard } from '../components/table/HandFan';
 import { Stage, type StageShow } from '../components/table/Stage';
 import { DiscardPile, DrawPile } from '../components/table/Piles';
@@ -441,22 +442,39 @@ export default function GamePage() {
       <TurnBanner text={banner?.text ?? null} gold={banner?.gold ?? false} />
       <BoomBanner name={boom?.name ?? null} />
 
-      {/* 对手席 */}
-      <header className="opponents-row">
-        {others.map((p) => (
-          <Seat
-            key={p.sessionId}
-            seat={p as SeatData}
-            isCurrent={p.sessionId === currentId}
-            bounced={p.sessionId === bounceId}
-            timer={p.sessionId === currentId ? turnRemaining : null}
-            emote={emoteBubbles[p.sessionId] ?? null}
-            emoji={
-              BUILTIN_CHARACTERS.find((c) => c.id === p.characterId)?.emoji ?? '🙂'
-            }
+      {/* 对手席（围绕桌面分布） */}
+      <div className="table-opponents">
+        {others.map((p, idx) => {
+          const positions = getSeatPositions(others.length);
+          const pos = positions[idx] ?? { top: '0%', left: '50%' };
+          return (
+            <TableSeat
+              key={p.sessionId}
+              seat={p as TableSeatData}
+              isCurrent={p.sessionId === currentId}
+              bounced={p.sessionId === bounceId}
+              timer={p.sessionId === currentId ? turnRemaining : null}
+              emote={emoteBubbles[p.sessionId] ?? null}
+              position={pos}
+            />
+          );
+        })}
+      </div>
+
+      {/* 我的角色展示（手牌区左上角） */}
+      {me && (
+        <div className="my-char-badge" style={{ ['--theme' as string]: (CHARACTER_RPG[me.characterId] ?? CHARACTER_RPG['none']!).themeColor }}>
+          <div
+            className="my-char-portrait"
+            style={{ backgroundImage: `url(/assets/characters/${me.characterId || 'none'}.jpg)` }}
           />
-        ))}
-      </header>
+          <div className="my-char-info">
+            <span className="my-char-name">{myChar?.name ?? '路人'}</span>
+            <span className="my-char-player">{me.name}</span>
+            {!me.alive && <span className="my-char-dead">💀 出局</span>}
+          </div>
+        </div>
+      )}
 
       {/* 中央牌桌 */}
       <main className="table-center-v2">
@@ -722,8 +740,15 @@ export default function GamePage() {
         {activeSkill && (
           <SkillDialog
             description={myChar?.description ?? ''}
-            costCards={(activeSkill.effect as { costCards: number }).costCards}
-            needsTarget={(activeSkill.effect as { kind: string }).kind === 'activeSteal'}
+            costCards={
+              (activeSkill.effect as { kind: string }).kind === 'activeSwap'
+                ? 0
+                : (activeSkill.effect as { costCards: number }).costCards
+            }
+            needsTarget={
+              (activeSkill.effect as { kind: string }).kind === 'activeSteal' ||
+              (activeSkill.effect as { kind: string }).kind === 'activeSwap'
+            }
             needsNamed={(activeSkill.effect as { named?: boolean }).named === true}
             cardMap={cardMap}
             selected={selected}
@@ -981,9 +1006,11 @@ function SkillDialog({
   return (
     <div>
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>{description}</p>
-      <p style={{ fontSize: 13 }}>
-        第一步：从手牌中点击勾选 <strong>{costCards}</strong> 张作为代价（已选 {selectedCount} 张）
-      </p>
+      {costCards > 0 && (
+        <p style={{ fontSize: 13 }}>
+          第一步：从手牌中点击勾选 <strong>{costCards}</strong> 张作为代价（已选 {selectedCount} 张）
+        </p>
+      )}
       {needsTarget && (
         <>
           <p style={{ fontSize: 13 }}>第二步：选择目标玩家</p>

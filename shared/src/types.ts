@@ -112,6 +112,7 @@ export type SkillEffect =
   | { kind: 'returnNoped'; times: number } // 前 N 张被否认的牌返还手牌
   | { kind: 'activeSteal'; costCards: number; named: boolean; uses: number } // 主动：弃 cost 张偷 1 张（named=可指定牌名）
   | { kind: 'activeRecycle'; costCards: number; uses: number } // 主动：弃 cost 张，从弃牌堆顶拿回 1 张
+  | { kind: 'activeSwap'; uses: number } // 主动：与目标玩家交换全部手牌，回合立即结束
   | { kind: 'startWithSkip'; count: number }; // 开局获得跳过（gainCardAtStart 的糖）
 
 export interface SkillDef {

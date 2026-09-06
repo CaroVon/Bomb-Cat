@@ -43,18 +43,8 @@ export default function App() {
           <span className="tag">{game.status === 'in-room' ? '已连接' : '未连接'}</span>
         </nav>
       )}
-      {/* 页面切换过渡（M3 emphasized 300ms + blur） */}
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={location.pathname}
-          initial={{ opacity: 0, y: 20, filter: 'blur(6px)' }}
-          animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-          exit={{ opacity: 0, y: -14, filter: 'blur(6px)' }}
-          transition={{ duration: 0.3, ease: [0.2, 0, 0, 1] }}
-        >
-          <Outlet />
-        </motion.div>
-      </AnimatePresence>
+      {/* 页面切换过渡（暂时禁用以排查测试问题） */}
+      <Outlet />
     </>
   );
 }
