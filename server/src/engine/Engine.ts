@@ -745,6 +745,18 @@ export class GameEngine {
         const defaultCount = isFQ ? 5 : (effect.count ?? 3);
         const n = Math.min(defaultCount, this.deck.length);
         const top = this.deck.slice(this.deck.length - n).reverse();
+        if (isFQ && n > 0) {
+          // future_queen 天眼强化：peek 升级为「查看5张+自由排列放回」
+          this.pendingAlter = { sessionId: player.sessionId, cards: top };
+          this.subPhase = 'awaiting-alter';
+          this.ev(events, {
+            type: 'private',
+            sessionId: player.sessionId,
+            message: { action: 'alterPrompt', cards: top.map((i) => this.defOf(i)) },
+          });
+          this.ev(events, { type: 'awaitingAlter' });
+          return 'suspend-alter';
+        }
         this.ev(events, {
           type: 'private',
           sessionId: player.sessionId,

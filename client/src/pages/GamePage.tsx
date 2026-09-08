@@ -66,6 +66,8 @@ export default function GamePage() {
   const [ruleDetailOpen, setRuleDetailOpen] = useState(false);
   const [objOpen, setObjOpen] = useState(false);
   const [bonusChoices, setBonusChoices] = useState<string[] | null>(null);
+  /** 当前需要选择目标的主动技 id（Pig King 吞噬等） */
+  const [skillTargetPicker, setSkillTargetPicker] = useState<string | null>(null);
   /** 座位表情气泡：sessionId -> {emoji, id} */
   const [emoteBubbles, setEmoteBubbles] = useState<Record<string, { emoji: string; id: number }>>({});
   const [settings, setSettingsState] = useState(getSettings());
@@ -300,7 +302,15 @@ export default function GamePage() {
 
   const myHand: HandCard[] = game.hand;
   const myChar = BUILTIN_CHARACTERS.find((c) => c.id === me?.characterId);
-  const activeSkill = myChar?.skills.find((s) => s.trigger === 'active');
+  const activeSkills = useMemo(
+    () => myChar?.skills.filter((s) => s.trigger === 'active') ?? [],
+    [myChar],
+  );
+  /** 用于旧版 SkillDialog 的首个有代价主动技 */
+  const activeSkill = activeSkills.find(
+    (s) =>
+      s.effect.kind === 'activeSteal' || s.effect.kind === 'activeRecycle' || s.effect.kind === 'activeSwap',
+  );
   const skillUsesLeft = activeSkill
     ? (me?.skillUsesLeft?.get?.(activeSkill.id) ?? me?.skillUsesLeft?.[activeSkill.id] ?? 0)
     : 0;
@@ -646,6 +656,42 @@ export default function GamePage() {
           />
         )}
 
+        {/* 多主动技按钮：为新原型（无代价直接发动 / 仅需目标）分别处理 */}
+        {canAct &&
+          activeSkills
+            .filter((s) => s.effect.kind !== 'activeSteal' && s.effect.kind !== 'activeRecycle' && s.effect.kind !== 'activeSwap')
+            .map((skill) => {
+              const cd = me?.skillCooldowns?.get?.(skill.id) ?? me?.skillCooldowns?.[skill.id] ?? 0;
+              const usesLeft = me?.skillUsesLeft?.get?.(skill.id) ?? me?.skillUsesLeft?.[skill.id] ?? 0;
+              const kind = skill.effect.kind;
+              const needsNoCost = kind === 'bananaRage' || kind === 'chaosWarp' || kind === 'chaosTouch';
+              const needsTargetOnly = kind === 'pigGluttony';
+              const disabled =
+                cd > 0 ||
+                (kind === 'bananaRage' && usesLeft <= 0) ||
+                (kind === 'pigGluttony' && !!(me as any)?.digestion);
+              return (
+                <button
+                  key={skill.id}
+                  className="action-skill"
+                  disabled={disabled}
+                  title={skill.description}
+                  onClick={() => {
+                    if (needsNoCost) {
+                      sendAct({ action: 'useSkill', skillId: skill.id });
+                    } else if (needsTargetOnly) {
+                      setSkillTargetPicker(skill.id);
+                    }
+                  }}
+                >
+                  {skill.name}
+                  {cd > 0 && <span className="skill-cooldown">CD{cd}</span>}
+                  {usesLeft > 0 && ` ×${usesLeft}`}
+                </button>
+              );
+            })}
+
+        {/* 旧版主动技（有代价流程的） */}
         {canAct && activeSkill && skillUsesLeft > 0 && (
           <button className="action-skill" onClick={() => setSkillOpen(true)}>
             {myChar!.emoji} {activeSkill.name} ×{skillUsesLeft}
@@ -934,6 +980,32 @@ export default function GamePage() {
             </div>
           </div>
         )}
+      </Modal>
+      {/* 主动技目标选择（Pig King 吞噬等） */}
+      <Modal open={!!skillTargetPicker} title="选择目标玩家" onClose={() => setSkillTargetPicker(null)}>
+        <div className="h-row">
+          {others
+            .filter((p) => p.alive)
+            .map((p) => (
+              <button
+                key={p.sessionId}
+                className="primary"
+                onClick={() => {
+                  sendAct({
+                    action: 'useSkill',
+                    skillId: skillTargetPicker!,
+                    targetSessionId: p.sessionId,
+                  });
+                  setSkillTargetPicker(null);
+                }}
+              >
+                {p.name}（{p.handCount} 张）
+              </button>
+            ))}
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <button onClick={() => setSkillTargetPicker(null)}>取消</button>
+        </div>
       </Modal>
     </div>
   );
