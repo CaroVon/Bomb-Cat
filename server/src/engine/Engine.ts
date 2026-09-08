@@ -106,6 +106,18 @@ export class GameEngine {
   /** 最近一次阵亡（可视化用：爆炸演出） */
   lastDeath: { sessionId: string; name: string; at: number } | null = null;
 
+  /* ---- v2：全局效果修饰器 ---- */
+  /** chaos_queen 混沌之触：激活时所有摸牌变为从随机玩家偷牌 */
+  chaosDrawsActive = false;
+  /** chaos_queen 混沌之触：激活者 sessionId（下轮其回合开始时关闭） */
+  chaosDrawsBy = '';
+  /** Banana 大香蕉之怒：剩余覆盖回合数（全局） */
+  bananaOverlayTurns = 0;
+  /** 眼泪牌等待队列（多张依次处理） */
+  pendingTearQueue: string[] = [];
+  /** 当前正在处理的眼泪牌信息 */
+  pendingTear: { sessionId: string; tearIid: string } | null = null;
+
   constructor(private rng: Rng = Math.random) {}
 
   /* ------------------------------------------------------------------ */
@@ -321,7 +333,38 @@ export class GameEngine {
       p.playsThisTurn = 0;
       p.defuseUsed = 0;
       p.attackedThisGame = false;
+      // v2：重置新状态
+      p.skillCooldowns = {};
+      p.permanentDead = false;
+      p.tearCount = 0;
+      p.digestion = null;
+      p.digestCount = 0;
+      p.fullTurns = 0;
+      p.forcedDraws = 0;
+      p.mustPlayIid = null;
+      p.isAngry = false;
+      p.rippleUsedThisTurn = false;
+
+      // Nana：开局没有拆解
+      if (p.characterId === 'nana') {
+        p.hand = p.hand.filter((c) => c.cardId !== 'defuse');
+      }
+      // future_queen：开局额外获得 2 张预知未来
+      if (p.characterId === 'future_queen') {
+        const fe = this.skillOf(p, 'turnStart');
+        if (fe?.effect.kind === 'futureEye' && fe.effect.bonusPeekCards > 0) {
+          for (let i = 0; i < fe.effect.bonusPeekCards; i++) {
+            p.hand.push({ iid: newIid('peek'), cardId: 'peek' });
+          }
+        }
+      }
     });
+    // 重置全局修饰器
+    this.chaosDrawsActive = false;
+    this.chaosDrawsBy = '';
+    this.bananaOverlayTurns = 0;
+    this.pendingTearQueue = [];
+    this.pendingTear = null;
 
     // World Rule 防爆过剩：额外 2 张拆解
     if (this.worldRuleId === 'defuse-plenty') {
@@ -697,7 +740,10 @@ export class GameEngine {
       }
 
       case 'peek': {
-        const n = Math.min(effect.count ?? 3, this.deck.length);
+        // future_queen 天眼强化：peek 看 5 张而非 3 张
+        const isFQ = player.characterId === 'future_queen';
+        const defaultCount = isFQ ? 5 : (effect.count ?? 3);
+        const n = Math.min(defaultCount, this.deck.length);
         const top = this.deck.slice(this.deck.length - n).reverse();
         this.ev(events, {
           type: 'private',
@@ -838,15 +884,45 @@ export class GameEngine {
     if (!player || player.sessionId !== sessionId) return this.invalid(sessionId, '还没轮到你');
 
     const events: EngineEvent[] = [];
-    const draws = this.worldRuleId === 'double-down' ? 2 : 1;
+
+    // Pig King 饱腹：不能摸牌（但可以出牌/用技能）
+    if (player.fullTurns > 0) {
+      return this.invalid(sessionId, '饱腹中，不能摸牌 🐷');
+    }
+
+    // Pig King 暴食：每次多摸 1 张
+    let draws = this.worldRuleId === 'double-down' ? 2 : 1;
+    if (player.characterId === 'pig_king') draws += 1;
+
+    // Pig King 饱腹解除后：必须连摸 3 张
+    if (player.forcedDraws > 0) {
+      draws = Math.max(draws, player.forcedDraws);
+      player.forcedDraws = 0;
+    }
+
     let drew = 0;
     while (drew < draws) {
       drew++;
+
+      // chaos_queen 混沌之触：摸牌变为从随机玩家偷牌
+      if (this.chaosDrawsActive) {
+        const stealResult = this.chaosSteal(player, events);
+        if (stealResult === 'dead') return events;
+        if (drew >= draws) return this.finishTurn(events);
+        continue;
+      }
+
       const c = this.deck.pop();
       if (!c) break;
+
+      // 眼泪牌：进入眼泪选择流程
+      if (c.cardId === 'tear') {
+        this.handleTearDrawn(player, c, events);
+        return events; // 眼泪处理完后自动继续
+      }
+
       if (c.cardId === 'exploding') {
         const r = this.handleExplosion(player, c, events);
-        // 拆解挂起 / 已阵亡（内部已推进回合）；藏猫 → 照常结束回合
         if (r === 'suspend-defuse' || !player.alive) return events;
         if (drew >= draws) return this.finishTurn(events);
         continue;
@@ -856,11 +932,80 @@ export class GameEngine {
     }
     if (this.worldRuleId === 'double-down') {
       this.log(events, `${player.name} 双倍下注，摸了 2 张牌 🎰`);
+    } else if (draws > 1) {
+      this.log(events, `${player.name} 暴食发动，摸了 ${draws} 张牌 🐷`);
     } else {
       this.log(events, `${player.name} 摸了一张牌`);
     }
     objHand(player, events);
     return this.finishTurn(events);
+  }
+
+  /** chaos_queen 混沌之触：从随机存活玩家偷 1 张（返回 'dead' 如果玩家死了） */
+  private chaosSteal(player: EnginePlayer, events: EngineEvent[]): 'ok' | 'dead' {
+    const others = this.players.filter((p) => p.alive && p.sessionId !== player.sessionId && p.hand.length > 0);
+    if (others.length === 0) {
+      this.log(events, `${player.name} 的混沌摸牌无目标可偷`);
+      return 'ok';
+    }
+    const victim = others[Math.floor(this.rng() * others.length)]!;
+    const idx = Math.floor(this.rng() * victim.hand.length);
+    const [stolen] = victim.hand.splice(idx, 1);
+    if (!stolen) return 'ok';
+    player.hand.push(stolen);
+    this.ev(events, { type: 'hand', sessionId: victim.sessionId });
+    this.ev(events, { type: 'hand', sessionId: player.sessionId });
+    this.ev(events, {
+      type: 'private',
+      sessionId: victim.sessionId,
+      message: { action: 'chaosDraw', fromName: player.name, cardName: this.defOf(stolen).name },
+    });
+    this.log(events, `🌀 混沌之触：${player.name} 从 ${victim.name} 手中夺取了 1 张牌`);
+    return 'ok';
+  }
+
+  /** 摸到眼泪牌：进入 awaiting-tear 子阶段 */
+  private handleTearDrawn(player: EnginePlayer, tear: CardInstance, events: EngineEvent[]): void {
+    const isNana = player.characterId === 'nana';
+    if (isNana) {
+      // Nana 摸到眼泪：不能拒绝，直接收取
+      player.hand.push(tear);
+      player.tearCount++;
+      this.ev(events, { type: 'hand', sessionId: player.sessionId });
+      this.log(events, `💧 ${player.name} 收下了自己的眼泪（${player.tearCount}/3）`);
+      if (player.tearCount >= 3) {
+        player.permanentDead = true;
+        player.alive = false;
+        player.hand = [];
+        this.deathOrder.push(player.sessionId);
+        this.lastDeath = { sessionId: player.sessionId, name: player.name, at: Date.now() };
+        this.log(events, `💀 ${player.name} 被眼泪彻底淹没了……（永久死亡）`);
+        this.ev(events, { type: 'death', sessionId: player.sessionId });
+        this.checkWin(events);
+        if (this.current()?.sessionId === player.sessionId) {
+          this.finishTurn(events);
+        }
+      } else {
+        // 继续回合（相当于正常摸牌）
+        this.finishTurn(events);
+      }
+      return;
+    }
+    // 其他玩家：弹出选择
+    this.pendingTear = { sessionId: player.sessionId, tearIid: tear.iid };
+    this.subPhase = 'awaiting-tear';
+    const nana = this.players.find((p) => p.characterId === 'nana');
+    this.ev(events, {
+      type: 'private',
+      sessionId: player.sessionId,
+      message: {
+        action: 'tearPrompt',
+        isNana: false,
+        nanaName: nana?.name ?? 'Nana',
+      },
+    });
+    this.ev(events, { type: 'awaitingTear' });
+    this.log(events, `💧 ${player.name} 摸到了 Nana 的眼泪……`);
   }
 
   /** 摸到爆炸猫：有拆解 → 挂起等待放回位置；没有 → 阵亡 */
@@ -910,7 +1055,17 @@ export class GameEngine {
     this.deathOrder.push(player.sessionId);
     this.lastDeath = { sessionId: player.sessionId, name: player.name, at: Date.now() };
     this.shuffle(this.deck);
-    this.log(events, `💥 ${player.name} 摸到了爆炸猫，当场爆炸出局！手牌已洗回牌堆`);
+
+    // Nana：死亡后化作眼泪牌流入牌堆（非永久死亡时）
+    if (player.characterId === 'nana' && !player.permanentDead) {
+      const tearIid = newIid('tear');
+      this.deck.push({ iid: tearIid, cardId: 'tear' });
+      this.shuffle(this.deck);
+      this.log(events, `💧 ${player.name} 化作一滴眼泪，流向了牌堆……`);
+      this.log(events, `💥 ${player.name} 摸到了爆炸猫，出局！（等待眼泪……）`);
+    } else {
+      this.log(events, `💥 ${player.name} 摸到了爆炸猫，当场爆炸出局！手牌已洗回牌堆`);
+    }
     this.ev(events, { type: 'death', sessionId: player.sessionId });
 
     if (this.checkWin(events)) return 'ok';
@@ -1060,6 +1215,72 @@ export class GameEngine {
   }
 
   private runTurnStartSkills(player: EnginePlayer, events: EngineEvent[]): void {
+    // 冷却递减（所有技能的冷却在回合开始时-1）
+    for (const [skillId, cd] of Object.entries(player.skillCooldowns)) {
+      if (cd > 0) player.skillCooldowns[skillId] = cd - 1;
+    }
+
+    // chaos_queen 混沌之触：激活者回合开始时关闭
+    if (this.chaosDrawsActive && this.chaosDrawsBy === player.sessionId) {
+      this.chaosDrawsActive = false;
+      this.chaosDrawsBy = '';
+      this.log(events, '🌀 混沌之触效果消退了');
+    }
+
+    // Banana 大香蕉之怒：覆盖回合数递减
+    if (this.bananaOverlayTurns > 0) {
+      this.bananaOverlayTurns--;
+      if (this.bananaOverlayTurns === 0) {
+        const banana = this.players.find((p) => p.characterId === 'banana');
+        if (banana) banana.isAngry = false;
+        this.log(events, '🍌 大香蕉之怒效果消退了');
+      }
+    }
+
+    // Pig King 消化周期
+    if (player.digestion && player.alive) {
+      player.digestion.turnsLeft--;
+      if (player.digestion.turnsLeft <= 0) {
+        const digested = player.digestion.card;
+        player.digestion = null;
+        player.hand.push(digested);
+        player.mustPlayIid = digested.iid;
+        player.digestCount++;
+        this.ev(events, { type: 'hand', sessionId: player.sessionId });
+        this.ev(events, {
+          type: 'private',
+          sessionId: player.sessionId,
+          message: { action: 'digestReady', cardName: this.defOf(digested).name },
+        });
+        this.log(events, `🐷 ${player.name} 消化完成，获得了【${this.defOf(digested).name}】！`);
+
+        // 检查饱腹
+        const pigSkill = this.skillOf(player, 'active');
+        if (pigSkill?.effect.kind === 'pigGluttony' && player.digestCount >= pigSkill.effect.fullAfterDigests) {
+          player.fullTurns = pigSkill.effect.fullTurns;
+          player.digestCount = 0;
+          this.log(events, `🐷 ${player.name} 吃太饱了！${player.fullTurns} 回合内不能摸牌`);
+          // 饱腹结束后需要连摸
+          // 设置一个标记，在 fullTurns 到 0 时设置 forcedDraws
+        }
+      }
+    }
+
+    // Pig King 饱腹递减
+    if (player.fullTurns > 0) {
+      player.fullTurns--;
+      if (player.fullTurns === 0) {
+        const pigSkill = this.skillOf(player, 'active');
+        if (pigSkill?.effect.kind === 'pigGluttony') {
+          player.forcedDraws = 3; // 饱腹解除后必须连摸 3 张
+          this.log(events, `🐷 ${player.name} 饿了！下一回合必须连摸 3 张牌`);
+        }
+      }
+    }
+
+    // chaos_queen 涟漪被动重置
+    player.rippleUsedThisTurn = false;
+
     // World Rule 传递快乐：随机一张传给下家
     if (this.worldRuleId === 'pass-joy' && player.alive && player.hand.length > 0) {
       const nextId = this.nextAliveSessionId();
@@ -1102,9 +1323,15 @@ export class GameEngine {
     const alive = this.players.filter((p) => p.alive);
     const holdsHidden = (p: EnginePlayer) =>
       p.hand.some((c) => c.cardId === 'exploding');
+    /** Nana 可复活（非永久死亡且眼泪未满）时不判负 */
+    const canRevive = (p: EnginePlayer) =>
+      p.characterId === 'nana' && !p.permanentDead && p.tearCount < 3;
 
     if (alive.length === 0) {
-      // 全灭（极罕见）：最后阵亡者为赢家
+      // 全灭（极罕见）：最后阵亡者为赢家（跳过可复活的 Nana）
+      const dead = this.players.filter((p) => !p.alive);
+      const revivable = dead.filter(canRevive);
+      if (revivable.length > 0) return false; // Nana 还能复活，游戏继续
       const last = this.deathOrder[this.deathOrder.length - 1];
       return this.finishGame(last, events);
     }
@@ -1155,7 +1382,11 @@ export class GameEngine {
     if (
       skill.effect.kind !== 'activeSteal' &&
       skill.effect.kind !== 'activeRecycle' &&
-      skill.effect.kind !== 'activeSwap'
+      skill.effect.kind !== 'activeSwap' &&
+      skill.effect.kind !== 'bananaRage' &&
+      skill.effect.kind !== 'pigGluttony' &&
+      skill.effect.kind !== 'chaosWarp' &&
+      skill.effect.kind !== 'chaosTouch'
     ) {
       return this.invalid(sessionId, '该技能不是主动技能');
     }
@@ -1163,7 +1394,11 @@ export class GameEngine {
 
     const events: EngineEvent[] = [];
     const st = this.skillState(player, skill.id);
-    if (st.used >= skillEffect.uses) return this.invalid(sessionId, '技能次数已用完');
+    // uses 检查：仅对有 uses 属性的原型生效
+    const usesVal = (skillEffect as { uses?: number }).uses;
+    if (usesVal !== undefined && st.used >= usesVal) {
+      return this.invalid(sessionId, '技能次数已用完');
+    }
 
     const cost = input.costInstanceIds ?? [];
     const requiredCost = skillEffect.kind === 'activeSwap' ? 0 : (skillEffect as { costCards?: number }).costCards ?? 0;
@@ -1246,6 +1481,70 @@ export class GameEngine {
       return events;
     }
 
+    // ---- v2：新角色技能 ----
+    if (skillEffect.kind === 'bananaRage') {
+      // Banana：大香蕉之怒（无拆解时才能发动）
+      if (player.hand.some((c) => c.cardId === 'defuse')) {
+        return this.invalid(sessionId, '手中有拆解时不能发动大香蕉之怒');
+      }
+      this.bananaOverlayTurns = skillEffect.overlayTurns;
+      player.isAngry = true;
+      st.used++;
+      this.log(
+        events,
+        `🍌 ${player.name} 发动「${skill.name}」！全场手牌变成了愤怒香蕉！（持续 ${skillEffect.overlayTurns} 回合）`,
+      );
+      this.ev(events, { type: 'private', sessionId, message: { action: 'notice', text: '🍌 大香蕉之怒已发动！覆盖期间：4 张手牌=1 拆解，3 张=任意技能牌。' } });
+      return events;
+    }
+
+    if (skillEffect.kind === 'pigGluttony') {
+      // Pig King：吞噬（冷却制）
+      const cd = player.skillCooldowns[skill.id] ?? 0;
+      if (cd > 0) return this.invalid(sessionId, `吞噬冷却中（剩 ${cd} 回合）`);
+      if (player.digestion) return this.invalid(sessionId, '正在消化中，不能吞噬');
+      const target = this.players.find((p) => p.sessionId === input.targetSessionId);
+      if (!target || !target.alive || target.sessionId === sessionId) {
+        return this.invalid(sessionId, '需要选择一名其他存活玩家');
+      }
+      const candidates = target.hand.filter((c) => c.cardId !== 'defuse');
+      if (candidates.length === 0) {
+        return this.invalid(sessionId, '对方没有可吞噬的牌（全是拆解）');
+      }
+      const eaten = candidates[Math.floor(this.rng() * candidates.length)]!;
+      target.hand = target.hand.filter((c) => c.iid !== eaten.iid);
+      player.digestion = { card: eaten, turnsLeft: skillEffect.digestTurns };
+      player.skillCooldowns[skill.id] = skill.cooldownTurns ?? skillEffect.digestTurns;
+      this.ev(events, { type: 'hand', sessionId: target.sessionId });
+      this.log(
+        events,
+        `🐷 ${player.name} 吞噬了 ${target.name} 的一张牌，正在消化……（${skillEffect.digestTurns} 回合后可用）`,
+      );
+      return events;
+    }
+
+    if (skillEffect.kind === 'chaosWarp') {
+      // chaos_queen：扭曲空间（反转出牌顺序）
+      const cd = player.skillCooldowns[skill.id] ?? 0;
+      if (cd > 0) return this.invalid(sessionId, `扭曲空间冷却中（剩 ${cd} 回合）`);
+      this.direction = this.direction === 1 ? -1 : 1;
+      player.skillCooldowns[skill.id] = skillEffect.cooldownTurns;
+      this.log(events, `🌀 ${player.name} 发动「${skill.name}」，出牌顺序反转！`);
+      return events;
+    }
+
+    if (skillEffect.kind === 'chaosTouch') {
+      // chaos_queen：混沌之触（全场摸牌变为偷牌）
+      const cd = player.skillCooldowns[skill.id] ?? 0;
+      if (cd > 0) return this.invalid(sessionId, `混沌之触冷却中（剩 ${cd} 回合）`);
+      this.chaosDrawsActive = true;
+      this.chaosDrawsBy = sessionId;
+      player.skillCooldowns[skill.id] = skillEffect.cooldownTurns;
+      this.log(events, `🌀 ${player.name} 发动「${skill.name}」！接下来一轮所有摸牌变为夺取！`);
+      this.ev(events, { type: 'private', sessionId, message: { action: 'chaosTouch', playerName: player.name } });
+      return events;
+    }
+
     return this.invalid(sessionId, '该技能不是主动技能');
   }
 
@@ -1258,7 +1557,93 @@ export class GameEngine {
     sessionId: string,
     input: { accept: boolean; giveInstanceId?: string },
   ): EngineEvent[] {
-    return this.invalid(sessionId, '眼泪牌系统尚未实现');
+    if (this.subPhase !== 'awaiting-tear' || !this.pendingTear) {
+      return this.invalid(sessionId, '现在没有眼泪待处理');
+    }
+    if (this.pendingTear.sessionId !== sessionId) {
+      return this.invalid(sessionId, '不是你的眼泪');
+    }
+    const player = this.players.find((p) => p.sessionId === sessionId)!;
+    const nana = this.players.find((p) => p.characterId === 'nana');
+    const events: EngineEvent[] = [];
+
+    // 从 pendingTear 恢复（眼泪牌不进手牌，直接在 pending 中）
+    this.pendingTear = null;
+    this.subPhase = 'awaiting-action';
+
+    if (input.accept && input.giveInstanceId && nana && !nana.permanentDead) {
+      // 选择喂给 Nana：弃 1 张手牌 → Nana 复活获得该牌
+      const idx = player.hand.findIndex((c) => c.iid === input.giveInstanceId);
+      if (idx < 0) return this.invalid(sessionId, '要给的牌不在你手中');
+      const [given] = player.hand.splice(idx, 1);
+
+      // Nana 复活
+      nana.alive = true;
+      nana.hand = [given!];
+      this.ev(events, { type: 'revive', sessionId: nana.sessionId });
+      this.ev(events, { type: 'hand', sessionId: nana.sessionId });
+      this.ev(events, { type: 'hand', sessionId: player.sessionId });
+      this.log(events, `💧 ${player.name} 喂了 Nana 一张牌，Nana 复活了！`);
+
+      // 眼泪牌传递给下一位存活玩家（入其手牌）
+      const nextAlive = this.nextAliveSessionId();
+      const nextPlayer = this.players.find((p) => p.sessionId === nextAlive);
+      if (nextPlayer && nextPlayer.sessionId !== player.sessionId) {
+        nextPlayer.hand.push({ iid: newIid('tear'), cardId: 'tear' });
+        this.ev(events, { type: 'hand', sessionId: nextPlayer.sessionId });
+        if (nextPlayer.characterId === 'nana') {
+          nextPlayer.tearCount++;
+          this.log(events, `💧 眼泪流回了 Nana 手中（${nextPlayer.tearCount}/3）`);
+          this.checkNanaTearDeath(nextPlayer, events);
+        } else {
+          this.log(events, `💧 眼泪流到了 ${nextPlayer.name} 手中`);
+        }
+      }
+    } else {
+      // 拒绝：额外摸 2 张牌，眼泪放回牌堆顶
+      for (let i = 0; i < 2; i++) {
+        const c = this.deck.pop();
+        if (!c) break;
+        if (c.cardId === 'exploding') {
+          this.handleExplosion(player, c, events);
+          return events;
+        }
+        player.hand.push(c);
+      }
+      this.deck.push({ iid: newIid('tear'), cardId: 'tear' });
+      this.ev(events, { type: 'hand', sessionId: player.sessionId });
+      this.log(events, `${player.name} 拒绝了眼泪，摸了 2 张牌，眼泪回到牌堆顶`);
+    }
+
+    // 恢复回合（摸到眼泪等于摸了牌，继续正常流程）
+    return this.finishTurn(events);
+  }
+
+  /** Nana 眼泪死亡检查 */
+  private checkNanaTearDeath(player: EnginePlayer, events: EngineEvent[]): void {
+    const skill = this.skillOf(player, 'gameStart');
+    const maxTears = skill?.effect.kind === 'nanaTear' ? skill.effect.maxTears : 3;
+    if (player.tearCount >= maxTears) {
+      player.permanentDead = true;
+      player.alive = false;
+      player.hand = [];
+      this.deathOrder.push(player.sessionId);
+      this.log(events, `💀 ${player.name} 被眼泪彻底淹没了……（永久死亡）`);
+      this.ev(events, { type: 'death', sessionId: player.sessionId });
+      this.checkWin(events);
+    }
+  }
+
+  /** 复活玩家 */
+  revivePlayer(sessionId: string, cards: CardInstance[], events: EngineEvent[]): void {
+    const p = this.players.find((x) => x.sessionId === sessionId);
+    if (!p || p.alive || p.permanentDead) return;
+    p.alive = true;
+    p.hand = cards;
+    // 从死亡序列中移除
+    this.deathOrder = this.deathOrder.filter((id) => id !== sessionId);
+    this.ev(events, { type: 'revive', sessionId });
+    this.ev(events, { type: 'hand', sessionId });
   }
 
   /** 香蕉货币替换 */
