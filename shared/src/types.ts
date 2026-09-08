@@ -55,7 +55,7 @@ export interface CardEffect {
 
 /* ============================== 卡牌 ============================== */
 
-export type CardKind = 'exploding' | 'defuse' | 'action' | 'plain' | 'streaking';
+export type CardKind = 'exploding' | 'defuse' | 'action' | 'plain' | 'streaking' | 'tear';
 
 export interface CardDef {
   /** 唯一 id；内置卡为短名，自定义卡必须带 "custom:" 前缀 */
@@ -104,16 +104,27 @@ export type SkillTrigger =
 /**
  * 技能效果原型（有界集合）：自定义角色只能从这些原型中组合，
  * 引擎逐一实现，保证任意组合都能被正确结算。
+ * v2 新增：冷却制、多主动技、眼泪/香蕉/消化/混沌/天眼原型。
  */
 export type SkillEffect =
+  // ---- v1 原型 ----
   | { kind: 'gainCardAtStart'; cardId: string; count: number } // 开局获得指定牌
   | { kind: 'peekAtTurnStart'; count: number } // 回合开始看牌堆顶 N 张
   | { kind: 'immuneSteal'; times: number } // 前 N 次被偷牌无效
   | { kind: 'returnNoped'; times: number } // 前 N 张被否认的牌返还手牌
-  | { kind: 'activeSteal'; costCards: number; named: boolean; uses: number } // 主动：弃 cost 张偷 1 张（named=可指定牌名）
+  | { kind: 'activeSteal'; costCards: number; named: boolean; uses: number } // 主动：弃 cost 张偷 1 张
   | { kind: 'activeRecycle'; costCards: number; uses: number } // 主动：弃 cost 张，从弃牌堆顶拿回 1 张
   | { kind: 'activeSwap'; uses: number } // 主动：与目标玩家交换全部手牌，回合立即结束
-  | { kind: 'startWithSkip'; count: number }; // 开局获得跳过（gainCardAtStart 的糖）
+  | { kind: 'startWithSkip'; count: number } // 开局获得跳过
+  // ---- v2 新增原型（五角色） ----
+  | { kind: 'nanaTear'; maxTears: number } // Nana：无拆解开局，死亡→眼泪牌，3张眼泪永死
+  | { kind: 'bananaRage'; overlayTurns: number; uses: number } // Banana：全场香蕉覆盖+香蕉货币
+  | { kind: 'pigGluttony'; extraDraw: number; digestTurns: number; fullTurns: number; fullAfterDigests: number } // Pig King：多摸+消化+饱腹
+  | { kind: 'chaosRipple'; cooldownTurns: number } // chaos_queen 被动：手牌变化→摸1（每回合1次）
+  | { kind: 'chaosWarp'; cooldownTurns: number } // chaos_queen 主动1：反转出牌顺序
+  | { kind: 'chaosTouch'; cooldownTurns: number } // chaos_queen 主动2：全场摸牌变为偷牌
+  | { kind: 'futureEye'; peekCount: number; bonusPeekCards: number; cooldownTurns: number } // future_queen：强化预知+命运改写
+  | { kind: 'forcedExtraDraw'; extra: number }; // 被动：每次摸牌多摸 N 张（Pig King 暴食用）
 
 export interface SkillDef {
   id: string;
@@ -121,6 +132,8 @@ export interface SkillDef {
   description: string;
   trigger: SkillTrigger;
   effect: SkillEffect;
+  /** 冷却回合数（0=无冷却，>0=每 N 回合可用一次） */
+  cooldownTurns?: number;
 }
 
 export interface CharacterDef {
@@ -203,7 +216,12 @@ export type ClientMessage =
       costInstanceIds?: string[];
       targetSessionId?: string;
       wantCardId?: string;
-    };
+    }
+  /* ---- v2：五角色新消息 ---- */
+  | { action: 'tearChoice'; accept: boolean; giveInstanceId?: string } // 眼泪选择：true=喂牌复活Nana
+  | { action: 'bananaSubstitute'; mode: 'defuse' | 'action'; cardId?: string; costInstanceIds: string[] } // 香蕉货币替换
+  | { action: 'futureRewritePick'; activateIdx: number; swapInstanceId: string; order: number[] } // Future女王：选激活+替换+重排
+  | { action: 'digestPlay'; instanceId: string }; // Pig King：打出消化完成的牌
 
 /** 服务端 → 客户端（私密/一次性消息；公开状态走 schema 同步） */
 export type ServerMessage =
@@ -221,7 +239,14 @@ export type ServerMessage =
       winnerName: string;
       ranking: Array<{ sessionId: string; name: string; place: number }>;
       objectives?: Array<{ sessionId: string; name: string; defId: string; defName: string; done: boolean }>;
-    };
+    }
+  /* ---- v2：五角色新消息 ---- */
+  | { action: 'tearPrompt'; isNana: boolean; nanaName: string } // 你摸到了眼泪牌
+  | { action: 'bananaRage'; playerName: string; turns: number } // Banana 发动大香蕉之怒
+  | { action: 'futureRewrite'; cards: CardDef[] } // Future女王命运改写：查看顶5张
+  | { action: 'digestReady'; cardName: string } // Pig King 消化完成
+  | { action: 'chaosTouch'; playerName: string } // 混沌之触激活
+  | { action: 'chaosDraw'; fromName: string; cardName: string }; // 混沌之触：你被偷了一张
 
 /** 手牌中的单张实例（发给本人时带定义） */
 export interface HandCard {

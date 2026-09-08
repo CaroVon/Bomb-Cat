@@ -416,6 +416,22 @@ export class GameRoom extends Room<{ state: GameState }> {
         );
         break;
       }
+      case 'tearChoice': {
+        this.process(this.engine.handleTearChoice(sid, message));
+        break;
+      }
+      case 'bananaSubstitute': {
+        this.process(this.engine.handleBananaSubstitute(sid, message));
+        break;
+      }
+      case 'futureRewritePick': {
+        this.process(this.engine.handleFutureRewrite(sid, message));
+        break;
+      }
+      case 'digestPlay': {
+        this.process(this.engine.handleDigestPlay(sid, message));
+        break;
+      }
       default: {
         const never: never = message;
         void never;

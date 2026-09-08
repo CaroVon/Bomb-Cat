@@ -192,6 +192,16 @@ export class GameEngine {
       defuseUsed: 0,
       attackedThisGame: false,
       objective: null,
+      skillCooldowns: {},
+      permanentDead: false,
+      tearCount: 0,
+      digestion: null,
+      digestCount: 0,
+      fullTurns: 0,
+      forcedDraws: 0,
+      mustPlayIid: null,
+      isAngry: false,
+      rippleUsedThisTurn: false,
     };
     this.players.push(player);
     if (!this.hostSessionId) this.hostSessionId = sessionId;
@@ -1237,6 +1247,42 @@ export class GameEngine {
     }
 
     return this.invalid(sessionId, '该技能不是主动技能');
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* v2：五角色新消息处理（暂为桩实现，逐步填充）                         */
+  /* ------------------------------------------------------------------ */
+
+  /** 眼泪选择：accept=true 时 giveInstanceId 为要喂给 Nana 的牌 */
+  handleTearChoice(
+    sessionId: string,
+    input: { accept: boolean; giveInstanceId?: string },
+  ): EngineEvent[] {
+    return this.invalid(sessionId, '眼泪牌系统尚未实现');
+  }
+
+  /** 香蕉货币替换 */
+  handleBananaSubstitute(
+    sessionId: string,
+    input: { mode: 'defuse' | 'action'; cardId?: string; costInstanceIds: string[] },
+  ): EngineEvent[] {
+    return this.invalid(sessionId, '香蕉货币系统尚未实现');
+  }
+
+  /** Future女王命运改写 */
+  handleFutureRewrite(
+    sessionId: string,
+    input: { activateIdx: number; swapInstanceId: string; order: number[] },
+  ): EngineEvent[] {
+    return this.invalid(sessionId, '命运改写尚未实现');
+  }
+
+  /** Pig King 打出消化完成的牌 */
+  handleDigestPlay(
+    sessionId: string,
+    input: { instanceId: string },
+  ): EngineEvent[] {
+    return this.invalid(sessionId, '消化系统尚未实现');
   }
 
   /* ------------------------------------------------------------------ */

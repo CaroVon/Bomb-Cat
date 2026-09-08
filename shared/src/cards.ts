@@ -173,6 +173,15 @@ export const BUILTIN_CARDS: CardDef[] = [
     description: '被动：摸到爆炸猫时可以秘密藏进手牌而不爆炸。持有爆炸猫期间无法获胜；再摸到一张会当场爆炸！',
     effects: [],
   },
+  /* ============ Nana 专属：眼泪牌 ============ */
+  {
+    id: 'tear',
+    name: '眼泪',
+    kind: 'tear',
+    emoji: '💧',
+    description: 'Nana 的眼泪。摸到时选择：弃 1 张手牌喂给 Nana 让她复活（眼泪传递给下一位），或拒绝并多摸 2 张（眼泪放回牌堆顶）。',
+    effects: [],
+  },
 ];
 
 export const BUILTIN_CARD_MAP: ReadonlyMap<string, CardDef> = new Map(

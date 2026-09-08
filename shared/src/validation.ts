@@ -43,8 +43,13 @@ export function validateCustomCard(card: CardDef, errors: string[]): boolean {
   if (typeof card.description !== 'string' || card.description.length > 120) {
     err(`${card.id}: 描述为空或超过 120 字`);
   }
-  if (card.kind === 'exploding' || card.kind === 'defuse' || card.kind === 'streaking') {
-    err(`${card.id}: 自定义卡不能是爆炸猫、拆解或果奔猫`);
+  if (
+    card.kind === 'exploding' ||
+    card.kind === 'defuse' ||
+    card.kind === 'streaking' ||
+    card.kind === 'tear'
+  ) {
+    err(`${card.id}: 自定义卡不能是爆炸猫、拆解、果奔猫或眼泪`);
   } else if (card.kind !== 'action' && card.kind !== 'plain') {
     err(`${card.id}: 卡牌类型必须是 action 或 plain`);
   }
@@ -193,6 +198,56 @@ export function validateSkill(skill: SkillDef, errors: string[]): boolean {
     case 'startWithSkip':
       if ((effect.count ?? 0) < 1 || (effect.count ?? 0) > 2) {
         return fail(errors, `${skill.id}: count 必须在 1-2`);
+      }
+      break;
+    case 'nanaTear':
+      if ((effect.maxTears ?? 0) < 1 || (effect.maxTears ?? 0) > 5) {
+        return fail(errors, `${skill.id}: maxTears 必须在 1-5`);
+      }
+      break;
+    case 'bananaRage':
+      if ((effect.overlayTurns ?? 0) < 1 || (effect.overlayTurns ?? 0) > 5) {
+        return fail(errors, `${skill.id}: overlayTurns 必须在 1-5`);
+      }
+      if ((effect.uses ?? 0) < 1 || (effect.uses ?? 0) > 2) {
+        return fail(errors, `${skill.id}: uses 必须在 1-2`);
+      }
+      break;
+    case 'pigGluttony':
+      if ((effect.extraDraw ?? 0) < 1 || (effect.extraDraw ?? 0) > 2) {
+        return fail(errors, `${skill.id}: extraDraw 必须在 1-2`);
+      }
+      if ((effect.digestTurns ?? 0) < 1 || (effect.digestTurns ?? 0) > 5) {
+        return fail(errors, `${skill.id}: digestTurns 必须在 1-5`);
+      }
+      if ((effect.fullTurns ?? 0) < 1 || (effect.fullTurns ?? 0) > 5) {
+        return fail(errors, `${skill.id}: fullTurns 必须在 1-5`);
+      }
+      if ((effect.fullAfterDigests ?? 0) < 1 || (effect.fullAfterDigests ?? 0) > 5) {
+        return fail(errors, `${skill.id}: fullAfterDigests 必须在 1-5`);
+      }
+      break;
+    case 'chaosRipple':
+    case 'chaosWarp':
+    case 'chaosTouch':
+      if ((effect.cooldownTurns ?? 0) < 1 || (effect.cooldownTurns ?? 0) > 10) {
+        return fail(errors, `${skill.id}: cooldownTurns 必须在 1-10`);
+      }
+      break;
+    case 'futureEye':
+      if ((effect.peekCount ?? 0) < 3 || (effect.peekCount ?? 0) > 7) {
+        return fail(errors, `${skill.id}: peekCount 必须在 3-7`);
+      }
+      if ((effect.bonusPeekCards ?? 0) < 0 || (effect.bonusPeekCards ?? 0) > 3) {
+        return fail(errors, `${skill.id}: bonusPeekCards 必须在 0-3`);
+      }
+      if ((effect.cooldownTurns ?? 0) < 1 || (effect.cooldownTurns ?? 0) > 10) {
+        return fail(errors, `${skill.id}: cooldownTurns 必须在 1-10`);
+      }
+      break;
+    case 'forcedExtraDraw':
+      if ((effect.extra ?? 0) < 1 || (effect.extra ?? 0) > 2) {
+        return fail(errors, `${skill.id}: extra 必须在 1-2`);
       }
       break;
     default:

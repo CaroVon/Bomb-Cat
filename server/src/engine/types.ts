@@ -29,33 +29,37 @@ export interface EnginePlayer {
   /** 连击剩余回合数（含当前回合） */
   turnsLeft: number;
   skillState: Record<string, SkillRuntimeState>;
-  /* ---- 迭代五：策略层状态（服务端内部，不进同步 schema） ---- */
-  /** 本局使用的个人构筑（true=用了 10 张自选） */
+  /* ---- 迭代五：策略层状态 ---- */
   buildUsed: boolean;
-  /** 无尽挑战增益 */
   runBonuses: string[];
-  /** 本回合已出牌数（连出王任务） */
   playsThisTurn: number;
-  /** 拆解使用次数（拆弹部队任务） */
   defuseUsed: number;
-  /** 是否打过攻击牌（和平主义任务） */
   attackedThisGame: boolean;
-  /** 秘密任务 */
   objective: {
     defId: string;
-    /** 比命长目标 */
     targetSessionId?: string;
-    /** 计数器（偷牌数等） */
     counter: number;
     done: boolean;
   } | null;
+  /* ---- v2：五角色新状态 ---- */
+  skillCooldowns: Record<string, number>;
+  permanentDead: boolean;
+  tearCount: number;
+  digestion: { card: CardInstance; turnsLeft: number } | null;
+  digestCount: number;
+  fullTurns: number;
+  forcedDraws: number;
+  mustPlayIid: string | null;
+  isAngry: boolean;
+  rippleUsedThisTurn: boolean;
 }
 
 export type SubPhase =
   | 'awaiting-action'
   | 'awaiting-nope'
   | 'awaiting-defuse'
-  | 'awaiting-alter';
+  | 'awaiting-alter'
+  | 'awaiting-tear';
 
 export interface PendingPlay {
   playId: string;
@@ -94,7 +98,10 @@ export type EngineEvent =
   | { type: 'defuseResolved' }
   | { type: 'awaitingAlter' }
   | { type: 'alterResolved' }
+  | { type: 'awaitingTear' }
+  | { type: 'tearResolved' }
   | { type: 'death'; sessionId: string }
+  | { type: 'revive'; sessionId: string }
   | { type: 'invalid'; sessionId: string; message: string }
   | {
       type: 'gameEnd';
