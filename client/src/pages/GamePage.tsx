@@ -13,6 +13,8 @@ import {
   leaveRoom,
   sendAct,
   sendEmote,
+  sendTearChoice,
+  clearTearPrompt,
   stateLog,
   turnOrderList,
   useGame,
@@ -418,8 +420,20 @@ export default function GamePage() {
   /* ---------------- 渲染 ---------------- */
 
   return (
-    <div className={`table-root ${boom ? 'is-shaking' : ''}`}>
+    <div
+      className={`table-root ${boom ? 'is-shaking' : ''} ${
+        state.bananaOverlayTurns > 0 ? 'banana-overlay-active' : ''
+      }`}
+    >
       <FlashOverlay boomKey={boom?.key ?? 0} />
+      {/* Banana 覆盖提示 */}
+      {state.bananaOverlayTurns > 0 && (
+        <div className="banana-banner">🍌 大香蕉之怒！剩 {state.bananaOverlayTurns} 回合</div>
+      )}
+      {/* 混沌之触提示 */}
+      {state.chaosDrawsActive && (
+        <div className="chaos-active-indicator">🌀 混沌之触：摸牌变为夺取</div>
+      )}
       {/* 回合超时红色 vignette（最后 10 秒） */}
       {isMyTurn && turnRemaining != null && turnRemaining <= 10 && me?.alive && state.phase === 'playing' && (
         <div className="turn-vignette" />
@@ -883,6 +897,43 @@ export default function GamePage() {
             结束挑战
           </button>
         </div>
+      </Modal>
+
+      {/* 眼泪选择弹窗 */}
+      <Modal open={!!game.tearPrompt} title="💧 你摸到了 Nana 的眼泪">
+        {game.tearPrompt && (
+          <div>
+            <p className="muted" style={{ fontSize: 14 }}>
+              你摸到了 {game.tearPrompt.nanaName} 的眼泪。选择你的回应：
+            </p>
+            <div className="h-row" style={{ gap: 14, marginTop: 16 }}>
+              <div
+                className="tear-choice-card"
+                onClick={() => {
+                  const firstCard = myHand.find(
+                    (c) => c.def.kind === 'action' || c.def.kind === 'plain',
+                  );
+                  if (firstCard) {
+                    sendTearChoice(true, firstCard.instanceId);
+                  }
+                }}
+              >
+                <span className="tear-emoji">💧❤️</span>
+                <strong>喂给 Nana</strong>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  弃 1 张手牌让她复活
+                </span>
+              </div>
+              <div className="tear-choice-card" onClick={() => sendTearChoice(false)}>
+                <span className="tear-emoji">🚫</span>
+                <strong>拒绝</strong>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  额外摸 2 张，眼泪回堆顶
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

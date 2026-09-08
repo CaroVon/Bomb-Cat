@@ -26,6 +26,8 @@ export interface GameSnapshot {
   myObjective: { defId: string; defName: string; description: string; targetName?: string } | null;
   /** 任务达成提示（id 去重） */
   objectiveDone: { id: number; defId: string; defName: string } | null;
+  /** 眼泪牌提示（摸到 Nana 的眼泪时弹出） */
+  tearPrompt: { id: number; isNana: boolean; nanaName: string } | null;
 }
 
 let snap: GameSnapshot = {
@@ -45,6 +47,7 @@ let snap: GameSnapshot = {
   lastEmote: null,
   myObjective: null,
   objectiveDone: null,
+  tearPrompt: null,
 };
 
 const listeners = new Set<() => void>();
@@ -177,6 +180,13 @@ function attach(room: Room<any>): void {
     snap.objectiveDone = { id: Date.now() + Math.random(), ...msg };
     emit();
   });
+  room.onMessage('tearPrompt', (msg: { isNana: boolean; nanaName: string }) => {
+    snap.tearPrompt = { id: Date.now() + Math.random(), ...msg };
+    emit();
+  });
+  room.onMessage('digestReady', (msg: { cardName: string }) => {
+    showToast(`🐷 消化完成：${msg.cardName}（必须打出）`);
+  });
 
   room.onLeave((code) => {
     if (code === 1000) {
@@ -303,6 +313,17 @@ export function sendAct(message: ClientMessage): void {
 
 export function sendEmote(emoji: string): void {
   snap.room?.send('emote', { emoji });
+}
+
+export function sendTearChoice(accept: boolean, giveInstanceId?: string): void {
+  snap.tearPrompt = null;
+  emit();
+  snap.room?.send('act', { action: 'tearChoice', accept, giveInstanceId });
+}
+
+export function clearTearPrompt(): void {
+  snap.tearPrompt = null;
+  emit();
 }
 
 export function clearPeek(id: number): void {

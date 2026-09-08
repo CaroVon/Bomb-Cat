@@ -1661,8 +1661,122 @@ button,
 }
 
 /* ============================================================
-   RPG 式角色选择界面
+   v2：眼泪弹窗 / 香蕉覆盖 / 消化区 / 冷却指示
    ============================================================ */
+
+/* 香蕉覆盖：所有手牌显示 angry_banana */
+.banana-overlay-active .pcard .pcard-art {
+  background-image: url('/assets/characters/angry_banana.jpg') !important;
+  background-size: cover;
+  background-position: center;
+}
+
+.banana-overlay-active .pcard .pcard-emoji {
+  display: none;
+}
+
+.banana-overlay-active .pcard .pcard-name::after {
+  content: ' 🍌';
+}
+
+/* 香蕉覆盖提示条 */
+.banana-banner {
+  position: fixed;
+  top: 70px;
+  left: 50%;
+  translate: -50%;
+  z-index: 180;
+  padding: 8px 24px;
+  border-radius: 999px;
+  background: rgba(229, 184, 9, 0.15);
+  border: 1px solid #e5b809;
+  color: #e5b809;
+  font-weight: 800;
+  font-size: 14px;
+  pointer-events: none;
+}
+
+/* 眼泪选择弹窗 */
+.tear-choice-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  min-width: 140px;
+  transition: all 0.15s ease;
+}
+
+.tear-choice-card:hover {
+  border-color: var(--gold);
+  background: rgba(212, 165, 87, 0.08);
+}
+
+.tear-choice-card .tear-emoji {
+  font-size: 36px;
+}
+
+/* 消化区显示 */
+.digest-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(246, 129, 211, 0.12);
+  border: 1 solid #f681d3;
+  color: #f681d3;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* 饱腹状态 */
+.full-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(224, 82, 82, 0.12);
+  border: 1px solid #e05252;
+  color: #e05252;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* 技能冷却指示 */
+.skill-cooldown {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.3);
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-left: 4px;
+}
+
+/* 混沌之触激活提示 */
+.chaos-active-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(153, 6, 222, 0.15);
+  border: 1px solid #9906de;
+  color: #9906de;
+  font-size: 12px;
+  font-weight: 700;
+  animation: chaos-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes chaos-pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
 
 .char-select {
   position: relative;
