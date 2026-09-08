@@ -19,6 +19,20 @@ export const PlayerState = schema(
     buildReady: t.boolean().default(false),
     /** 主动技能剩余次数（skillId -> 次数） */
     skillUsesLeft: t.map('number'),
+    /** 技能冷却剩余回合（skillId -> 回合数） */
+    skillCooldowns: t.map('number'),
+    /** Pig King：消化中的卡牌名（空=无） */
+    digestionCardName: t.string().default(''),
+    /** Pig King：消化剩余回合 */
+    digestionTurns: t.number().default(0),
+    /** Pig King：饱腹剩余回合 */
+    fullTurns: t.number().default(0),
+    /** Pig King：消化次数 */
+    digestCount: t.number().default(0),
+    /** Banana：愤怒形态 */
+    isAngry: t.boolean().default(false),
+    /** Nana：永久死亡 */
+    permanentDead: t.boolean().default(false),
   },
   'PlayerState',
 );
@@ -81,6 +95,14 @@ export const GameState = schema(
     worldRuleName: t.string().default(''),
     worldRuleDesc: t.string().default(''),
     worldRuleEmoji: t.string().default(''),
+
+    /* ---- v2：五角色新公开状态 ---- */
+    /** Banana 大香蕉之怒：剩余覆盖回合数 */
+    bananaOverlayTurns: t.number().default(0),
+    /** chaos_queen 混沌之触是否激活 */
+    chaosDrawsActive: t.boolean().default(false),
+    /** 当前眼泪处理者（空=无） */
+    tearPendingBy: t.string().default(''),
   },
   'GameState',
 );

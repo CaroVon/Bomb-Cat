@@ -580,6 +580,10 @@ export class GameRoom extends Room<{ state: GameState }> {
     s.worldRuleName = rule?.name ?? '';
     s.worldRuleDesc = rule?.description ?? '';
     s.worldRuleEmoji = rule?.emoji ?? '';
+    // v2：全局效果修饰器
+    s.bananaOverlayTurns = e.bananaOverlayTurns;
+    s.chaosDrawsActive = e.chaosDrawsActive;
+    s.tearPendingBy = e.pendingTear?.sessionId ?? '';
     s.turnIndex = e.turnIndex;
     s.direction = e.direction;
     s.deckCount = e.deck.length;
@@ -638,6 +642,21 @@ export class GameRoom extends Room<{ state: GameState }> {
       ps.turnsLeft = ep.turnsLeft;
         ps.isHost = ep.sessionId === e.hostSessionId;
         ps.buildReady = !!this.pendingBuilds[ep.sessionId];
+
+        // v2：新状态同步
+        ps.isAngry = ep.isAngry;
+        ps.permanentDead = ep.permanentDead;
+        ps.fullTurns = ep.fullTurns;
+        ps.digestCount = ep.digestCount;
+        ps.digestionCardName = ep.digestion ? this.engine.cardMap.get(ep.digestion.card.cardId)?.name ?? '' : '';
+        ps.digestionTurns = ep.digestion?.turnsLeft ?? 0;
+
+        // 技能冷却同步
+        for (const [skillId, cd] of Object.entries(ep.skillCooldowns)) {
+          if (ps.skillCooldowns.get(skillId) !== cd) {
+            ps.skillCooldowns.set(skillId, cd);
+          }
+        }
 
       // 主动技能剩余次数
       const ch = e.characterMap.get(ep.characterId);
