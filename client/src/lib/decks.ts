@@ -3,9 +3,22 @@ import { supabase } from './supabase';
 
 const LOCAL_KEY = 'bombcat:customDecks';
 
+/** 已下架的卡（精准攻击已删除）：读取旧存档时自动剔除，避免校验报错 */
+const RETIRED_CARDS = new Set(['targetedAttack']);
+
 export function loadDecks(): DeckDef[] {
   try {
-    return JSON.parse(localStorage.getItem(LOCAL_KEY) ?? '[]') as DeckDef[];
+    const decks = JSON.parse(localStorage.getItem(LOCAL_KEY) ?? '[]') as DeckDef[];
+    return decks.map((d) =>
+      d.counts && Object.keys(d.counts).some((id) => RETIRED_CARDS.has(id))
+        ? {
+            ...d,
+            counts: Object.fromEntries(
+              Object.entries(d.counts).filter(([id]) => !RETIRED_CARDS.has(id)),
+            ),
+          }
+        : d,
+    );
   } catch {
     return [];
   }

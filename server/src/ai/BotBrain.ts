@@ -10,9 +10,16 @@ export type BotDecision =
   | { kind: 'play'; instanceId: string; comboInstanceIds?: string[]; targetSessionId?: string; wantCardId?: string }
   | { kind: 'draw' }
   | { kind: 'defuse'; position: number }
-  | { kind: 'alter'; order: number[] };
+  | { kind: 'alter'; order: number[] }
+  | { kind: 'bananaAction'; cardId: string; costInstanceIds: string[] }
+  | { kind: 'iceHelp'; targetSessionId: string }
+  | { kind: 'appleEat'; giveInstanceId: string };
 
 const rand = () => Math.random();
+
+/** 爆炸类卡（爆炸猫 / 爆炸苹果），按 cardId 判断（bot 侧无 cardMap 便捷访问） */
+const isBoom = (cardId: string): boolean =>
+  cardId === 'exploding' || cardId === 'exploding-apple';
 
 export function decide(
   e: GameEngine,
@@ -31,11 +38,11 @@ export function decide(
 
   if (e.subPhase === 'awaiting-alter') {
     if (e.pendingAlter?.sessionId !== sid) return null;
-    // 爆炸猫排到最后（摸到的顺序最晚）
+    // 爆炸猫/爆炸苹果排到最后（摸到的顺序最晚）
     const cards = e.pendingAlter.cards;
     const normal: number[] = [];
     const booms: number[] = [];
-    cards.forEach((c, i) => (c.cardId === 'exploding' ? booms : normal).push(i));
+    cards.forEach((c, i) => (isBoom(c.cardId) ? booms : normal).push(i));
     return { kind: 'alter', order: [...normal, ...booms] };
   }
 
@@ -53,21 +60,66 @@ export function decide(
   const has = (id: string) => (byId.get(id)?.length ?? 0) > 0;
   const pick = (id: string) => byId.get(id)![0]!.iid;
 
+  // 邪恶苹果：身上有苹果时，剩 1 回合必吃，否则 50% 概率吃掉（给出最便宜的牌）
+  if (me.appleTurns > 0 && hand.length > 0) {
+    const mustEat = me.appleTurns <= 1;
+    if (mustEat || rand() < 0.5) {
+      const plain = hand.find((c) => e.cardMap.get(c.cardId)?.kind === 'plain');
+      const give = plain ?? hand[hand.length - 1]!;
+      return { kind: 'appleEat', giveInstanceId: give.iid };
+    }
+  }
+
+  // 秀英冰冻：无法出牌/摸牌 → 优先向还没问过的玩家求助，否则结束回合
+  if (me.freezeLayers > 0 && !me.helpedThisTurn) {
+    const askable = e.players.filter(
+      (p) => p.alive && p.sessionId !== sid && !me.askedHelp.includes(p.sessionId),
+    );
+    const helpSkill = e.characterMap
+      .get(me.characterId)
+      ?.skills.find((s) => s.effect.kind === 'iceHelp');
+    if (helpSkill && askable.length > 0 && rand() < 0.85) {
+      const target = askable[Math.floor(rand() * askable.length)]!;
+      return { kind: 'iceHelp', targetSessionId: target.sessionId };
+    }
+    return { kind: 'draw' };
+  }
+
+  // 香蕉覆盖期间：组合被禁用
+  // - 香蕉女王只能靠兑换出牌（2 张香蕉 = 任意技能牌）
+  // - 其他人只能盲打单牌（随机抽一张，猫/拆解/否认会直接进弃牌堆）
+  if (e.bananaOverlayTurns > 0) {
+    if (me.characterId === 'banana') {
+      if (hand.length >= 2 && rand() < 0.85) {
+        const choice = ['skip', 'shuffle'].find((id) => e.cardMap.has(id));
+        if (choice) {
+          return { kind: 'bananaAction', cardId: choice, costInstanceIds: hand.slice(0, 2).map((c) => c.iid) };
+        }
+      }
+      return { kind: 'draw' };
+    }
+    if (hand.length > 0 && rand() < 0.5) {
+      const c = hand[Math.floor(rand() * hand.length)]!;
+      return { kind: 'play', instanceId: c.iid };
+    }
+    return { kind: 'draw' };
+  }
+
   const aliveOthers = e.players.filter((p) => p.alive && p.sessionId !== sid);
   const aliveCount = e.players.filter((p) => p.alive).length;
-  // 信念：剩余爆炸猫 ≈ 存活人数 - 1（近似，不作弊）
-  const danger = (aliveCount - 1) / Math.max(e.deck.length, 1);
+  // 信念：剩余爆炸猫 ≈ 存活人数 + 2（近似，不作弊）
+  const danger = (aliveCount + 2) / Math.max(e.deck.length, 1);
   const hasDefuse = has('defuse');
   const top = knownTop?.[0] ?? null;
 
   // 已知顶牌是爆炸猫 → 优先规避
-  if (top === 'exploding' && !hasDefuse) {
+  if (isBoom(top ?? '') && !hasDefuse) {
     if (has('skip')) return { kind: 'play', instanceId: pick('skip') };
     if (has('attack')) return { kind: 'play', instanceId: pick('attack') };
     if (has('shuffle')) return { kind: 'play', instanceId: pick('shuffle') };
     return { kind: 'draw' }; // 认命
   }
-  if (top === 'exploding' && hasDefuse && rand() < 0.5 && has('skip')) {
+  if (isBoom(top ?? '') && hasDefuse && rand() < 0.5 && has('skip')) {
     return { kind: 'play', instanceId: pick('skip') }; // 有拆解也省着用
   }
 

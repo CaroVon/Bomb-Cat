@@ -58,15 +58,19 @@ export function DiscardPile({
   cardMap: Map<string, CardDef>;
 }) {
   const scattered = useMemo(() => {
-    return topIds.slice(-8).map((cardId, i, arr) => {
+    const arr = topIds.slice(-8);
+    return arr.map((cardId, i) => {
       const isTop = i >= arr.length - 3; // 顶部 3 张散乱，底下是稳定堆
       const r = mulberry32(hashStr(`${cardId}-${i}`));
       const rotate = isTop ? (r() - 0.5) * 26 : (r() - 0.5) * 8;
       const x = isTop ? (r() - 0.5) * 15 : (r() - 0.5) * 5;
       const y = isTop ? (r() - 0.5) * 11 : (r() - 0.5) * 4;
-      return { cardId, rotate, x, y, z: i };
+      // 全局弃牌序号作为 key：窗口滑动时旧牌 key 不变，只有新牌入场动画
+      const absIndex = total - (arr.length - 1 - i);
+      return { cardId, rotate, x, y, z: i, key: `${cardId}-${absIndex}` };
     });
-  }, [topIds.join(',')]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topIds.join(','), total]);
 
   return (
     <div className="pile-wrap">
@@ -74,7 +78,7 @@ export function DiscardPile({
         <AnimatePresence initial={false}>
           {scattered.map((c) => (
             <motion.div
-              key={`${c.cardId}-${c.z}`}
+              key={c.key}
               className="pile-layer"
               initial={{ opacity: 0, scale: 1.5, rotate: 0, y: -60 }}
               animate={{ opacity: 1, scale: 1, rotate: c.rotate, x: c.x, y: c.y }}

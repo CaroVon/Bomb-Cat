@@ -28,6 +28,19 @@ export interface GameSnapshot {
   objectiveDone: { id: number; defId: string; defName: string } | null;
   /** 眼泪牌提示（摸到 Nana 的眼泪时弹出） */
   tearPrompt: { id: number; isNana: boolean; nanaName: string } | null;
+  /** Future女王命运改写：顶 N 张牌（等待提交选择） */
+  futureRewritePrompt: CardDef[] | null;
+  /** 拆解提示是否可用香蕉兑换（香蕉女王覆盖期且无真拆解） */
+  defuseBanana: boolean;
+  /** 大眼Nana揭发：目标牌面（view 关闭即结束；discard/steal 需点选一张） */
+  exposePrompt: {
+    id: number;
+    targetName: string;
+    cards: Array<{ instanceId: string; def: CardDef }>;
+    mode: 'view' | 'discard' | 'steal';
+  } | null;
+  /** 秀英求助：收到求助请求（我是被求助者，需回应） */
+  helpPrompt: { id: number; fromName: string } | null;
 }
 
 let snap: GameSnapshot = {
@@ -48,6 +61,10 @@ let snap: GameSnapshot = {
   myObjective: null,
   objectiveDone: null,
   tearPrompt: null,
+  futureRewritePrompt: null,
+  defuseBanana: false,
+  exposePrompt: null,
+  helpPrompt: null,
 };
 
 const listeners = new Set<() => void>();
@@ -153,9 +170,10 @@ function attach(room: Room<any>): void {
       emit();
     }
   });
-  room.onMessage('promptDefuse', (msg: ServerMessage & { deckCount: number }) => {
+  room.onMessage('promptDefuse', (msg: ServerMessage & { deckCount: number; bananaSubstitute?: boolean }) => {
     if (msg.action === 'promptDefuse') {
       snap.defusePrompt = msg.deckCount;
+      snap.defuseBanana = !!msg.bananaSubstitute;
       emit();
     }
   });
@@ -184,8 +202,43 @@ function attach(room: Room<any>): void {
     snap.tearPrompt = { id: Date.now() + Math.random(), ...msg };
     emit();
   });
-  room.onMessage('digestReady', (msg: { cardName: string }) => {
-    showToast(`🐷 消化完成：${msg.cardName}（必须打出）`);
+  room.onMessage('digestReady', (msg: { cardName: string; instanceId: string }) => {
+    showToast(`🐷 消化完成：${msg.cardName}（本回合必须打出或丢弃这张牌）`);
+  });
+  room.onMessage('chaosDraw', (msg: { fromName: string; cardName: string }) => {
+    showToast(`🌀 混沌之触：${msg.fromName} 夺走了你的【${msg.cardName}】`);
+  });
+  room.onMessage('chaosTouch', (msg: { playerName: string }) => {
+    showToast(`🌀 ${msg.playerName} 施放混沌之触：本轮所有摸牌变为夺取！`);
+  });
+  room.onMessage('futureRewrite', (msg: { cards: CardDef[] }) => {
+    snap.futureRewritePrompt = msg.cards;
+    emit();
+  });
+  room.onMessage(
+    'exposePrompt',
+    (msg: { targetName: string; cards: Array<{ instanceId: string; def: CardDef }>; mode: 'view' | 'discard' | 'steal' }) => {
+      snap.exposePrompt = { id: ++modalSeq, ...msg };
+      emit();
+    },
+  );
+  /* ---- v3：数学老师 / 秀英 ---- */
+  room.onMessage('helpPrompt', (msg: { fromName: string }) => {
+    snap.helpPrompt = { id: ++modalSeq, fromName: msg.fromName };
+    emit();
+  });
+  room.onMessage('helpResolved', (msg: { accepted: boolean; helperName?: string }) => {
+    snap.helpPrompt = null;
+    showToast(
+      msg.accepted
+        ? `🧊 ${msg.helperName ?? '对方'} 帮助了你，冰冻 -1，本回合可以正常行动`
+        : `🧊 ${msg.helperName ?? '对方'} 拒绝了求助，可以继续问其他人`,
+    );
+    emit();
+  });
+  /* ---- v4：邪恶苹果头 ---- */
+  room.onMessage('appleGiven', (msg: { fromName: string; turns: number }) => {
+    showToast(`🍏 ${msg.fromName} 朝你扔了一个邪恶苹果！${msg.turns} 回合内可在自己回合吃掉它（交出一张手牌）`);
   });
 
   room.onLeave((code) => {
@@ -198,6 +251,8 @@ function attach(room: Room<any>): void {
     snap.status = 'idle';
     snap.alterPrompt = null;
     snap.defusePrompt = null;
+    snap.futureRewritePrompt = null;
+    snap.defuseBanana = false;
     emit();
   });
   room.onError?.((code: number, message?: string) => {
@@ -324,6 +379,72 @@ export function sendTearChoice(accept: boolean, giveInstanceId?: string): void {
 export function clearTearPrompt(): void {
   snap.tearPrompt = null;
   emit();
+}
+
+/** 香蕉女王兑换（4 张=拆解 / 3 张=任意动作牌） */
+export function sendBananaSubstitute(
+  mode: 'defuse' | 'action',
+  costInstanceIds: string[],
+  extra?: { cardId?: string; position?: number; targetSessionId?: string },
+): void {
+  snap.room?.send('act', {
+    action: 'bananaSubstitute',
+    mode,
+    costInstanceIds,
+    cardId: extra?.cardId,
+    position: extra?.position,
+    targetSessionId: extra?.targetSessionId,
+  });
+}
+
+/** Future女王命运改写提交 */
+export function sendFutureRewritePick(input: {
+  activateIdx: number;
+  swapInstanceId: string;
+  order: number[];
+  targetSessionId?: string;
+}): void {
+  snap.futureRewritePrompt = null;
+  emit();
+  snap.room?.send('act', { action: 'futureRewritePick', ...input });
+}
+
+export function clearFutureRewritePrompt(): void {
+  if (snap.futureRewritePrompt !== null) {
+    snap.futureRewritePrompt = null;
+    emit();
+  }
+}
+
+/** 猪王：直接丢弃消化完成的牌 */
+export function sendDigestPlay(instanceId: string): void {
+  snap.room?.send('act', { action: 'digestPlay', instanceId });
+}
+
+/** 大眼Nana：揭发点选（弃/抽目标一张牌） */
+export function sendExposePick(instanceId: string): void {
+  snap.exposePrompt = null;
+  emit();
+  snap.room?.send('act', { action: 'exposePick', instanceId });
+}
+
+export function clearExposePrompt(): void {
+  if (snap.exposePrompt !== null) {
+    snap.exposePrompt = null;
+    emit();
+  }
+}
+
+/** 秀英求助：回应（同意需给出一张手牌） */
+export function sendHelpRespond(accept: boolean, giveInstanceId?: string): void {
+  snap.helpPrompt = null;
+  emit();
+  snap.room?.send('act', { action: 'helpRespond', accept, giveInstanceId });
+}
+
+/** 邪恶苹果头：吃掉身上的邪恶苹果（交出一张手牌给投掷者） */
+export function sendAppleEat(giveInstanceId: string): void {
+  snap.room?.send('act', { action: 'appleEat', giveInstanceId });
 }
 
 export function clearPeek(id: number): void {

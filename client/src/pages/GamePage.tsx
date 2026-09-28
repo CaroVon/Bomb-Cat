@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import { BUILTIN_CHARACTERS, RUN_BONUS_MAP, type CardDef, type HandCard } from '@bombcat/shared';
 import {
   buildCardMap,
   clearAlterPrompt,
+  clearFutureRewritePrompt,
   clearGameEnd,
   clearPeek,
   clearPeekHand,
@@ -12,14 +13,23 @@ import {
   lastPlayCardIds,
   leaveRoom,
   sendAct,
+  sendBananaSubstitute,
+  sendDigestPlay,
   sendEmote,
+  sendExposePick,
+  sendFutureRewritePick,
+  clearExposePrompt,
+  sendHelpRespond,
+  sendAppleEat,
   sendTearChoice,
   clearTearPrompt,
   stateLog,
   turnOrderList,
   useGame,
+  type GameSnapshot,
 } from '../lib/game';
 import { activeSkinMap } from '../lib/skins';
+import { portraitUrl } from '../lib/portraits';
 import { animMs, getSettings, setSetting } from '../lib/settings';
 import { sfx } from '../lib/sound';
 import { explodeAt, winCelebration } from '../lib/fx';
@@ -40,8 +50,7 @@ function cardNeedsTarget(def: CardDef): boolean {
       e.type === 'stealRandom' ||
       e.type === 'stealNamed' ||
       e.type === 'peekHand' ||
-      e.type === 'swapHand' ||
-      e.type === 'targetedAttack',
+      e.type === 'swapHand',
   );
 }
 
@@ -61,13 +70,24 @@ export default function GamePage() {
     | null
   >(null);
   const [skillOpen, setSkillOpen] = useState(false);
-  const [now, setNow] = useState(Date.now());
   const [emoteOpen, setEmoteOpen] = useState(false);
   const [ruleDetailOpen, setRuleDetailOpen] = useState(false);
   const [objOpen, setObjOpen] = useState(false);
   const [bonusChoices, setBonusChoices] = useState<string[] | null>(null);
   /** 当前需要选择目标的主动技 id（Pig King 吞噬等） */
   const [skillTargetPicker, setSkillTargetPicker] = useState<string | null>(null);
+  /** Voyage 换牌第二步：选自己要交出的 3 张牌 */
+  const [voyageGive, setVoyageGive] = useState<{
+    skillId: string;
+    targetSessionId: string;
+    targetName: string;
+  } | null>(null);
+  /** 邪恶苹果头：吃苹果弹窗（选一张手牌交出） */
+  const [appleEatOpen, setAppleEatOpen] = useState(false);
+  /** 日志面板（默认折叠，避免遮挡右上座位） */
+  const [logOpen, setLogOpen] = useState(false);
+  /** 香蕉女王 3 张兑换弹窗 */
+  const [bananaExchangeOpen, setBananaExchangeOpen] = useState(false);
   /** 座位表情气泡：sessionId -> {emoji, id} */
   const [emoteBubbles, setEmoteBubbles] = useState<Record<string, { emoji: string; id: number }>>({});
   const [settings, setSettingsState] = useState(getSettings());
@@ -81,15 +101,10 @@ export default function GamePage() {
   }, []);
 
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 250);
-    return () => clearInterval(t);
-  }, []);
-
-  useEffect(() => {
     if (!room && game.status === 'idle') navigate('/lobby');
   }, [room, game.status, navigate]);
 
-  const cardMap = useMemo(() => buildCardMap(state), [game.version, state]);
+  const cardMap = useMemo(() => buildCardMap(state), [state?.customCardsJson]);
   const myId = room?.sessionId ?? '';
   const log = useMemo(() => stateLog(state), [game.version, state]);
 
@@ -114,6 +129,8 @@ export default function GamePage() {
   /* ---------------- 舞台 / 爆炸 / 横幅（可视化状态机） ---------------- */
 
   const [stage, setStage] = useState<StageShow | null>(null);
+  /** 正在被目标型效果指定的座位（1.6s 金色脉冲） */
+  const [targetedId, setTargetedId] = useState('');
   const seenPlay = useRef(0);
   useEffect(() => {
     const at = state?.lastPlayAt ?? 0;
@@ -127,7 +144,13 @@ export default function GamePage() {
         byName: state.lastPlayBy ?? '',
         cards: defs,
         noped: state.lastPlayNoped ?? false,
+        targetName: (state.lastPlayTargetName as string) || undefined,
       });
+      const tid = (state.lastPlayTargetId as string) || '';
+      if (tid) {
+        setTargetedId(tid);
+        window.setTimeout(() => setTargetedId((cur) => (cur === tid ? '' : cur)), 1600);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.lastPlayAt]);
@@ -142,7 +165,8 @@ export default function GamePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.lastPlayNoped]);
 
-  const nopeRemaining = Math.max(0, Math.ceil(((state?.nopeEndsAt ?? 0) - now) / 1000));
+  // 否认窗口剩余秒数由 <NopeCountBadge> 自计时显示（不牵动整页）
+  const nopeEndsAt = (state?.nopeEndsAt ?? 0) as number;
 
   // 停留时长与"是否需要他人响应"挂钩（EK2 教训）：否认窗口期持续展示，否则 ~1.6s
   useEffect(() => {
@@ -153,11 +177,13 @@ export default function GamePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage?.id, state?.nopeActive, state?.lastPlayNoped, settings.fastAnim]);
 
-  // 舞台倒计时（否认窗口中）
-  const stageCountdown = state?.nopeActive ? nopeRemaining : undefined;
+  // 舞台倒计时（否认窗口中，自计时）
   const stageWithCountdown = useMemo(
-    () => (stage ? { ...stage, countdown: stageCountdown } : null),
-    [stage, stageCountdown],
+    () =>
+      stage
+        ? { ...stage, countdownEndsAt: state?.nopeActive ? nopeEndsAt : undefined }
+        : null,
+    [stage, state?.nopeActive, nopeEndsAt],
   );
 
   const [boom, setBoom] = useState<{ key: number; name: string } | null>(null);
@@ -326,6 +352,12 @@ export default function GamePage() {
   const playable = useMemo(() => {
     const set = new Set<string>();
     if (!canAct) return set;
+    // 猪王：消化牌未处理时只能打那张牌
+    const must = (me as any)?.mustPlayIid as string | undefined;
+    if (must) {
+      set.add(must);
+      return set;
+    }
     const counts = new Map<string, number>();
     myHand.forEach((c) => counts.set(c.def.id, (counts.get(c.def.id) ?? 0) + 1));
     const plains = myHand.filter((c) => c.def.kind === 'plain' && c.def.comboable);
@@ -352,6 +384,10 @@ export default function GamePage() {
 
   const fanCards: FanCard[] = myHand;
 
+  // 覆盖期间手牌遮名；香蕉女王的兑换入口
+  const bananaOverlay = state.bananaOverlayTurns > 0;
+  const iAmBanana = me?.characterId === 'banana';
+
   /* ---------------- 交互 ---------------- */
 
   function toggleSelect(instanceId: string) {
@@ -359,6 +395,33 @@ export default function GamePage() {
       prev.includes(instanceId) ? prev.filter((i) => i !== instanceId) : [...prev, instanceId],
     );
   }
+
+  const onCardClick = useCallback(
+    (card: HandCard) => {
+      if (!canAct) return;
+      // 大香蕉之怒覆盖期间：女王点手牌只会选中（选中的牌用于兑换）；其他人盲打
+      if (bananaOverlay) {
+        if (iAmBanana) {
+          toggleSelect(card.instanceId);
+          return;
+        }
+        playSingle(card);
+        return;
+      }
+      if (card.def.kind === 'plain') {
+        toggleSelect(card.instanceId);
+        return;
+      }
+      if (cardNeedsTarget(card.def)) {
+        setTargetMode({ kind: 'play', combo: [] });
+        pendingPlay.current = card;
+        return;
+      }
+      playSingle(card);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [canAct, targetMode, playSingle, bananaOverlay, iAmBanana],
+  );
 
   function playSingle(card: HandCard, targetSessionId?: string, combo: string[] = []) {
     sendAct({
@@ -370,20 +433,6 @@ export default function GamePage() {
     });
     setSelected([]);
     setTargetMode(null);
-  }
-
-  function onCardClick(card: HandCard) {
-    if (!canAct) return;
-    if (card.def.kind === 'plain') {
-      toggleSelect(card.instanceId);
-      return;
-    }
-    if (cardNeedsTarget(card.def)) {
-      setTargetMode({ kind: 'play', combo: [] });
-      pendingPlay.current = card;
-      return;
-    }
-    playSingle(card);
   }
 
   function confirmTarget(targetSessionId: string) {
@@ -423,11 +472,22 @@ export default function GamePage() {
   const bounceId =
     stage && Date.now() - (state.lastPlayAt ?? 0) < 1200 ? (state.lastPlayById as string) : '';
 
-  /** 当前回合剩余秒数（服务端权威 turnEndsAt） */
-  const turnRemaining =
-    state.turnEndsAt > 0 ? Math.max(0, Math.ceil((state.turnEndsAt - now) / 1000)) : null;
+  const turnEndsAt = (state.turnEndsAt ?? 0) as number;
 
   /* ---------------- 渲染 ---------------- */
+
+  // 座位位置表按对手数缓存（稳定引用，避免 TableSeat memo 失效）
+  const seatPositions = useMemo(() => getSeatPositions(others.length), [others.length]);
+
+  // 香蕉女王的兑换入口（覆盖期间 2 张手牌 = 任意技能牌）
+  const canBananaAction =
+    canAct && bananaOverlay && iAmBanana && myHand.length >= 2 && !me?.mustPlayIid;
+  // 秀英：冰冻状态（本回合被帮助过则可正常行动）
+  const iAmXiuying = me?.characterId === 'xiuying';
+  const myFrozenNow = !!me?.freezeLayers && me.freezeLayers > 0 && !me.helpedThisTurn;
+  const helpWaiting = state.helpOwnerId === myId && !!state.helpPendingBy;
+  // 猪王：必须先处理消化牌
+  const myMustPlay = (me?.mustPlayIid as string) || '';
 
   return (
     <div
@@ -438,15 +498,20 @@ export default function GamePage() {
       <FlashOverlay boomKey={boom?.key ?? 0} />
       {/* Banana 覆盖提示 */}
       {state.bananaOverlayTurns > 0 && (
-        <div className="banana-banner">🍌 大香蕉之怒！剩 {state.bananaOverlayTurns} 回合</div>
+        <div className="banana-banner">
+          🍌 大香蕉之怒！剩 {state.bananaOverlayTurns} 轮（所有存活玩家各行动一次）
+          <span className="banana-banner-sub">
+            {iAmBanana ? '点手牌仅选中 · 2 张=技能牌 / 4 张=拆解' : '手牌已洗乱 · 只能盲打单牌'}
+          </span>
+        </div>
       )}
       {/* 混沌之触提示 */}
       {state.chaosDrawsActive && (
         <div className="chaos-active-indicator">🌀 混沌之触：摸牌变为夺取</div>
       )}
-      {/* 回合超时红色 vignette（最后 10 秒） */}
-      {isMyTurn && turnRemaining != null && turnRemaining <= 10 && me?.alive && state.phase === 'playing' && (
-        <div className="turn-vignette" />
+      {/* 回合超时红色 vignette（最后 10 秒，自计时） */}
+      {isMyTurn && me?.alive && state.phase === 'playing' && turnEndsAt > 0 && (
+        <TurnVignette endsAt={turnEndsAt} />
       )}
       {/* 技能触发反馈 */}
       <AnimatePresence>
@@ -469,17 +534,30 @@ export default function GamePage() {
       {/* 对手席（围绕桌面分布） */}
       <div className="table-opponents">
         {others.map((p, idx) => {
-          const positions = getSeatPositions(others.length);
-          const pos = positions[idx] ?? { top: '0%', left: '50%' };
+          const pos = seatPositions[idx] ?? { top: '0%', left: '50%' };
           return (
             <TableSeat
               key={p.sessionId}
               seat={p as TableSeatData}
               isCurrent={p.sessionId === currentId}
               bounced={p.sessionId === bounceId}
-              timer={p.sessionId === currentId ? turnRemaining : null}
+              timerEndsAt={p.sessionId === currentId ? turnEndsAt : null}
               emote={emoteBubbles[p.sessionId] ?? null}
               position={pos}
+              targeted={p.sessionId === targetedId}
+              handCount={p.handCount as number}
+              alive={!!p.alive}
+              connected={!!p.connected}
+              turnsLeft={(p.turnsLeft as number) ?? 1}
+              digestionTurns={(p.digestionTurns as number) ?? 0}
+              fullTurns={(p.fullTurns as number) ?? 0}
+              archives={(p.archives as number) ?? 0}
+              mathSubDraw={(p.mathSubDraw as number) ?? 0}
+              mathMulNext={(p.mathMulNext as number) ?? 0}
+              mathDivNext={(p.mathDivNext as number) ?? 0}
+              freezeLayers={(p.freezeLayers as number) ?? 0}
+              lychees={(p.lychees as number) ?? 0}
+              appleTurns={(p.appleTurns as number) ?? 0}
             />
           );
         })}
@@ -490,12 +568,62 @@ export default function GamePage() {
         <div className="my-char-badge" style={{ ['--theme' as string]: (CHARACTER_RPG[me.characterId] ?? CHARACTER_RPG['none']!).themeColor }}>
           <div
             className="my-char-portrait"
-            style={{ backgroundImage: `url(/assets/characters/${me.characterId || 'none'}.jpg)` }}
+            style={{ backgroundImage: `url(${portraitUrl(me.characterId)})` }}
           />
           <div className="my-char-info">
             <span className="my-char-name">{myChar?.name ?? '路人'}</span>
             <span className="my-char-player">{me.name}</span>
             {!me.alive && <span className="my-char-dead">💀 出局</span>}
+            {!!me.digestionTurns && me.digestionTurns > 0 && (
+              <span className="seat-status-badge is-digest" title="消化中（剩余回合）">
+                🐷 消化中 ×{me.digestionTurns}
+              </span>
+            )}
+            {!!me.fullTurns && me.fullTurns > 0 && (
+              <span className="seat-status-badge is-full" title="饱腹中：不能摸牌，结束回合跳过摸牌">
+                🥱 饱腹 ×{me.fullTurns}
+              </span>
+            )}
+            {myMustPlay && (
+              <span className="seat-status-badge is-must" title="必须先打出或丢弃这张消化牌">
+                ⚠️ 必须打出消化牌
+              </span>
+            )}
+            {!!me.archives && me.archives > 0 && (
+              <span className="seat-status-badge is-archive" title="档案：你正在被大眼Nana监视">
+                👁档案 {me.archives}
+              </span>
+            )}
+            {!!me.freezeLayers && me.freezeLayers > 0 && (
+              <span className="seat-status-badge is-frozen" title="冰冻中：无法出牌/摸牌，且不受技能影响；可向其他玩家求助解冻">
+                ❄️ 冰冻 ×{me.freezeLayers}
+              </span>
+            )}
+            {!!me.mathSubDraw && me.mathSubDraw > 0 && (
+              <span className="seat-status-badge is-mathsub" title="减法：你的下一次摸牌少摸一张">
+                ➖ 减法 ×{me.mathSubDraw}
+              </span>
+            )}
+            {!!me.mathMulNext && me.mathMulNext > 0 && (
+              <span className="seat-status-badge is-mathmul" title="乘法：你的下一张功能牌触发两次">
+                ✖️ 乘法 ×{me.mathMulNext}
+              </span>
+            )}
+            {!!me.mathDivNext && me.mathDivNext > 0 && (
+              <span className="seat-status-badge is-mathdiv" title="除法：你的下一张功能牌无法触发">
+                ➗ 除法 ×{me.mathDivNext}
+              </span>
+            )}
+            {!!me.lychees && me.lychees > 0 && (
+              <span className="seat-status-badge is-lychee" title="荔枝：集齐 2 颗获得一张普通小猫牌">
+                🍒 荔枝 {me.lychees}/2
+              </span>
+            )}
+            {!!me.appleTurns && me.appleTurns > 0 && (
+              <span className="seat-status-badge is-apple" title="你身上有邪恶苹果：不吃掉的话会变成爆炸苹果混入牌堆">
+                🍏 邪恶苹果 ×{me.appleTurns}
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -556,23 +684,65 @@ export default function GamePage() {
       <div className="actionbar">
         <button
           className={`action-main ${canAct ? 'is-active' : ''}`}
-          disabled={!canAct}
+          disabled={!canAct || !!myMustPlay || helpWaiting}
+          title={
+            myFrozenNow
+              ? '冰冻中：结束回合不摸牌（可先向其他玩家求助解冻）'
+              : me?.fullTurns > 0
+                ? '饱腹中：结束回合将不摸牌'
+                : myMustPlay
+                  ? '必须先处理消化获得的牌'
+                  : undefined
+          }
           onClick={() => sendAct({ action: 'draw' })}
         >
-          结束回合 · 摸牌
-          {isMyTurn && turnRemaining != null && (
-            <span className={`turn-count ${turnRemaining <= 10 ? 'is-urgent' : ''}`}>
-              {turnRemaining}
-            </span>
-          )}
+          {myFrozenNow
+            ? '结束回合（冰冻·不摸牌）'
+            : me?.fullTurns > 0
+              ? '结束回合（饱腹·不摸牌）'
+              : '结束回合 · 摸牌'}
+          {isMyTurn && turnEndsAt > 0 && <TurnCountBadge endsAt={turnEndsAt} />}
         </button>
+
+        {/* 猪王：直接丢弃消化完成的牌 */}
+        {canAct && myMustPlay && (
+          <button
+            className="action-skill"
+            title="无法正常打出时（如白板猫/否认牌）直接丢弃消化牌"
+            onClick={() => sendDigestPlay(myMustPlay)}
+          >
+            🐷 丢弃消化牌
+          </button>
+        )}
+
+        {/* 香蕉女王：2 张香蕉兑换任意技能牌（选中的手牌自动带入代价） */}
+        {canBananaAction && (
+          <button
+            className="action-skill"
+            title="覆盖期间点手牌只会选中；选 2 张后点此兑换任意技能牌"
+            onClick={() => setBananaExchangeOpen(true)}
+          >
+            🍌×2 换技能牌
+          </button>
+        )}
+
+        {/* 邪恶苹果头：吃掉身上的邪恶苹果 */}
+        {canAct && (me?.appleTurns ?? 0) > 0 && (
+          <button
+            className="action-skill"
+            title="吃掉邪恶苹果：交出一张手牌给投掷者，苹果消失（不吃的话会变成爆炸苹果混入牌堆）"
+            onClick={() => setAppleEatOpen(true)}
+          >
+            🍏 吃掉邪恶苹果 ×{me.appleTurns}
+          </button>
+        )}
 
         {canNope && (
           <button
             className="action-nope"
             onClick={() => myNope && sendAct({ action: 'playCard', instanceId: myNope.instanceId, asNope: true })}
           >
-            否认！<span className="nope-count">{nopeRemaining}</span>
+            否认！<NopeCountBadge endsAt={nopeEndsAt} />
           </button>
         )}
 
@@ -630,7 +800,7 @@ export default function GamePage() {
           {settings.fastAnim ? '⏩' : '▶️'}
         </button>
 
-        {canAct && selectedSamePlain && selectedCards.length === 2 && (
+        {canAct && !bananaOverlay && !myFrozenNow && selectedSamePlain && selectedCards.length === 2 && (
           <button
             className="action-combo"
             onClick={() =>
@@ -643,7 +813,7 @@ export default function GamePage() {
             对子 · 偷随机牌 →
           </button>
         )}
-        {canAct && selectedSamePlain && selectedCards.length === 3 && (
+        {canAct && !bananaOverlay && !myFrozenNow && selectedSamePlain && selectedCards.length === 3 && (
           <NamedComboButton
             cardMap={cardMap}
             onPick={(cardId) =>
@@ -664,18 +834,55 @@ export default function GamePage() {
               const cd = me?.skillCooldowns?.get?.(skill.id) ?? me?.skillCooldowns?.[skill.id] ?? 0;
               const usesLeft = me?.skillUsesLeft?.get?.(skill.id) ?? me?.skillUsesLeft?.[skill.id] ?? 0;
               const kind = skill.effect.kind;
-              const needsNoCost = kind === 'bananaRage' || kind === 'chaosWarp' || kind === 'chaosTouch';
-              const needsTargetOnly = kind === 'pigGluttony';
+              const needsNoCost =
+                kind === 'bananaRage' || kind === 'chaosWarp' || kind === 'chaosTouch' || kind === 'futureRewrite';
+              const needsTargetOnly =
+                kind === 'pigGluttony' ||
+                kind === 'voyageSwap' ||
+                kind === 'bigEyeExpose' ||
+                kind === 'mathOp' ||
+                kind === 'iceHelp' ||
+                kind === 'iceLychee' ||
+                kind === 'appleThrow';
+              const eligibleTargets =
+                kind === 'bigEyeExpose'
+                  ? others.filter((p) => p.alive && (p.archives ?? 0) >= 2)
+                  : kind === 'iceHelp'
+                    ? others.filter(
+                        (p) =>
+                          p.alive &&
+                          !((me?.askedHelp?.toArray?.() ?? me?.askedHelp ?? []) as string[]).includes(
+                            p.sessionId,
+                          ),
+                      )
+                    : kind === 'appleThrow'
+                      ? others.filter((p) => p.alive && ((p.appleTurns ?? 0) as number) === 0)
+                      : [];
               const disabled =
                 cd > 0 ||
-                (kind === 'bananaRage' && usesLeft <= 0) ||
-                (kind === 'pigGluttony' && !!(me as any)?.digestion);
+                (kind === 'bananaRage' && (usesLeft <= 0 || bananaOverlay)) ||
+                (kind === 'pigGluttony' && !!(me as any)?.digestion) ||
+                (kind === 'bigEyeExpose' && eligibleTargets.length === 0) ||
+                // 秀英：冰冻时才可求助；解冻后才可喂荔枝（每回合 1 颗）
+                (kind === 'iceHelp' && (!myFrozenNow || eligibleTargets.length === 0)) ||
+                (kind === 'iceLychee' && (myFrozenNow || !!me?.lycheeGiven)) ||
+                (kind === 'appleThrow' && eligibleTargets.length === 0);
+              const title =
+                kind === 'bananaRage' && bananaOverlay
+                  ? '大香蕉之怒正在生效，无法再次发动'
+                  : kind === 'iceHelp' && !myFrozenNow
+                    ? '只有冰冻中才能求助'
+                    : kind === 'iceLychee' && myFrozenNow
+                      ? '解冻或被帮助的回合才能喂荔枝'
+                      : kind === 'appleThrow' && eligibleTargets.length === 0
+                        ? '其他玩家身上都已经有邪恶苹果了'
+                        : skill.description;
               return (
                 <button
                   key={skill.id}
                   className="action-skill"
                   disabled={disabled}
-                  title={skill.description}
+                  title={title}
                   onClick={() => {
                     if (needsNoCost) {
                       sendAct({ action: 'useSkill', skillId: skill.id });
@@ -705,26 +912,37 @@ export default function GamePage() {
         )}
       </div>
 
-      {/* 手牌 */}
-      <footer className="handzone">
+      {/* 手牌（自己是效果目标时顶部提示脉冲） */}
+      <footer className={`handzone ${targetedId === myId && me?.alive ? 'is-targeted' : ''}`}>
         {me && !me.alive && state.phase === 'playing' && (
           <div className="spectate-note">👻 你已出局 · 观战中，胜利结算后可返回大厅</div>
         )}
         <HandFan
           cards={fanCards}
-          interactive={!!canAct}
+          interactive={!!canAct && !myFrozenNow}
           selected={selected}
           playable={playable}
           onCardClick={onCardClick}
+          masked={bananaOverlay}
+          mustPlayIid={myMustPlay || undefined}
         />
       </footer>
 
-      {/* 日志 */}
-      <aside className="log-panel">
-        {log.slice(-10).map((line, i) => (
-          <div className="log-line" key={i}>{line}</div>
-        ))}
-      </aside>
+      {/* 日志（默认折叠，避免遮挡右上角座位） */}
+      {logOpen ? (
+        <aside className="log-panel is-open">
+          <button className="log-close" onClick={() => setLogOpen(false)}>
+            × 收起
+          </button>
+          {log.slice(-30).map((line, i) => (
+            <div className="log-line" key={i}>{line}</div>
+          ))}
+        </aside>
+      ) : (
+        <button className="log-toggle" onClick={() => setLogOpen(true)} title="查看对局日志">
+          📜 日志
+        </button>
+      )}
 
       {/* Toast */}
       {game.toast && <div className="toast">{game.toast.text}</div>}
@@ -743,7 +961,7 @@ export default function GamePage() {
         <div className="h-row">
           {(game.peek?.cards ?? []).map((c, i) => (
             <div key={i} style={{ textAlign: 'center' }}>
-              <CardView def={c} size="hand" />
+              <CardView def={c} size="hand" masked={bananaOverlay} />
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>第 {i + 1} 张</div>
             </div>
           ))}
@@ -758,7 +976,7 @@ export default function GamePage() {
       >
         <div className="h-row">
           {(game.peekHandInfo?.cards ?? []).map((c, i) => (
-            <CardView key={i} def={c} size="mini" />
+            <CardView key={i} def={c} size="mini" masked={bananaOverlay} />
           ))}
           {(game.peekHandInfo?.cards?.length ?? 0) === 0 && (
             <span className="muted">对方没有手牌</span>
@@ -782,7 +1000,7 @@ export default function GamePage() {
         </div>
       </Modal>
 
-      {/* 拆解位置（schema 驱动） */}
+      {/* 拆解位置（schema 驱动；香蕉女王无真拆解时走香蕉兑换） */}
       <DefuseModal
         open={
           state.phase === 'playing' &&
@@ -790,6 +1008,29 @@ export default function GamePage() {
           state.defuseBy === myId
         }
         deckCount={state.deckCount}
+        bananaMode={
+          game.defuseBanana &&
+          iAmBanana &&
+          myHand.length >= 4 &&
+          !myHand.some((c) => c.def.id === 'defuse')
+        }
+      />
+
+      {/* 香蕉女王：2 张香蕉兑换任意动作牌 */}
+      <BananaExchangeModal
+        open={bananaExchangeOpen}
+        cardMap={cardMap}
+        hand={myHand}
+        others={others.filter((p) => p.alive)}
+        initialCost={selected}
+        onClose={() => setBananaExchangeOpen(false)}
+      />
+
+      {/* Future女王：命运改写 */}
+      <FutureRewriteModal
+        cards={game.futureRewritePrompt}
+        hand={myHand}
+        others={others.filter((p) => p.alive)}
       />
 
       {/* 重排未来 */}
@@ -981,37 +1222,293 @@ export default function GamePage() {
           </div>
         )}
       </Modal>
-      {/* 主动技目标选择（Pig King 吞噬等） */}
+      {/* 主动技目标选择（吞噬/Voyage 交换/揭发等） */}
       <Modal open={!!skillTargetPicker} title="选择目标玩家" onClose={() => setSkillTargetPicker(null)}>
         <div className="h-row">
           {others
-            .filter((p) => p.alive)
+            .filter(
+              (p) =>
+                p.alive &&
+                (skillTargetPicker !== 'bigeye-expose' || (p.archives ?? 0) >= 2) &&
+                // 秀英求助：本回合问过的玩家不再列出
+                !(
+                  activeSkills.find((s) => s.id === skillTargetPicker)?.effect.kind === 'iceHelp' &&
+                  ((me?.askedHelp?.toArray?.() ?? me?.askedHelp ?? []) as string[]).includes(
+                    p.sessionId,
+                  )
+                ),
+            )
             .map((p) => (
               <button
                 key={p.sessionId}
                 className="primary"
                 onClick={() => {
+                  const picked = skillTargetPicker!;
+                  const kind = activeSkills.find((s) => s.id === picked)?.effect.kind;
+                  setSkillTargetPicker(null);
+                  if (kind === 'voyageSwap') {
+                    // Voyage：两步弹窗——选完目标再选自己要交出的 3 张牌
+                    setVoyageGive({ skillId: picked, targetSessionId: p.sessionId, targetName: p.name });
+                    return;
+                  }
                   sendAct({
                     action: 'useSkill',
-                    skillId: skillTargetPicker!,
+                    skillId: picked,
                     targetSessionId: p.sessionId,
                   });
-                  setSkillTargetPicker(null);
                 }}
               >
-                {p.name}（{p.handCount} 张）
+                {p.name}（{p.handCount} 张
+                {skillTargetPicker === 'bigeye-expose' ? ` · 👁档案 ${p.archives ?? 0}` : ''}）
               </button>
             ))}
+          {skillTargetPicker === 'bigeye-expose' &&
+            others.every((p) => !p.alive || (p.archives ?? 0) < 2) && (
+              <span className="muted">还没有玩家的档案达到 2 个</span>
+            )}
+          {activeSkills.find((s) => s.id === skillTargetPicker)?.effect.kind === 'iceHelp' &&
+            others.every(
+              (p) =>
+                !p.alive ||
+                ((me?.askedHelp?.toArray?.() ?? me?.askedHelp ?? []) as string[]).includes(
+                  p.sessionId,
+                ),
+            ) && <span className="muted">本回合已经问过所有人了，结束回合吧</span>}
         </div>
         <div style={{ marginTop: 14 }}>
           <button onClick={() => setSkillTargetPicker(null)}>取消</button>
         </div>
       </Modal>
+
+      {/* 大眼Nana：揭发展示 */}
+      <ExposeModal info={game.exposePrompt} />
+
+      {/* 秀英求助：被求助者回应弹窗 */}
+      <HelpRequestModal
+        info={game.helpPrompt}
+        hand={myHand}
+        onClose={() => sendHelpRespond(false)}
+      />
+
+      {/* 邪恶苹果头：吃苹果弹窗 */}
+      <AppleEatModal
+        open={appleEatOpen}
+        hand={myHand}
+        masked={bananaOverlay}
+        onClose={() => setAppleEatOpen(false)}
+      />
+
+      {/* 秀英：等待回应提示 */}
+      {helpWaiting && (
+        <div className="help-waiting">🧊 等待 {others.find((p) => p.sessionId === state.helpPendingBy)?.name ?? '对方'} 回应求助…</div>
+      )}
+
+      {/* Voyage：换牌第二步——选自己要交出的 3 张牌 */}
+      <VoyageGiveModal
+        info={voyageGive}
+        hand={myHand}
+        masked={bananaOverlay}
+        onClose={() => setVoyageGive(null)}
+      />
     </div>
   );
 }
 
 /* ---------------- 子组件 ---------------- */
+
+/** 邪恶苹果头：吃掉身上的邪恶苹果（选一张手牌交给投掷者） */
+function AppleEatModal({
+  open,
+  hand,
+  masked,
+  onClose,
+}: {
+  open: boolean;
+  hand: HandCard[];
+  masked?: boolean;
+  onClose: () => void;
+}) {
+  const [giveId, setGiveId] = useState<string | null>(null);
+  useEffect(() => {
+    setGiveId(null);
+  }, [open]);
+  return (
+    <Modal open={open} title="🍏 吃掉邪恶苹果" onClose={onClose}>
+      <p className="muted" style={{ fontSize: 13 }}>
+        吃掉苹果需要交给投掷者一张手牌，苹果随即消失；不吃的话它会在剩余回合后变成爆炸苹果混入牌堆。
+      </p>
+      <p className="muted" style={{ fontSize: 13, marginTop: 8 }}>
+        选择要交出的牌{giveId ? '（已选 1 张）' : ''}：
+      </p>
+      <div className="h-row" style={{ flexWrap: 'wrap', maxHeight: 220, overflowY: 'auto' }}>
+        {hand.map((c) => (
+          <CardView
+            key={c.instanceId}
+            def={c.def}
+            size="mini"
+            masked={masked}
+            selected={giveId === c.instanceId}
+            onClick={() => setGiveId(giveId === c.instanceId ? null : c.instanceId)}
+          />
+        ))}
+      </div>
+      <div className="h-row" style={{ marginTop: 16 }}>
+        <button
+          className="primary"
+          disabled={!giveId}
+          onClick={() => {
+            if (giveId) sendAppleEat(giveId);
+            onClose();
+          }}
+        >
+          🍏 吃掉苹果（交出手牌）
+        </button>
+        <button onClick={onClose}>再想想</button>
+      </div>
+    </Modal>
+  );
+}
+
+/** 秀英求助：被求助者选择是否帮助（同意需交出一张手牌） */
+function HelpRequestModal({
+  info,
+  hand,
+  onClose,
+}: {
+  info: { id: number; fromName: string } | null;
+  hand: HandCard[];
+  onClose: () => void;
+}) {
+  const [giveId, setGiveId] = useState<string | null>(null);
+  useEffect(() => {
+    setGiveId(null);
+  }, [info?.id]);
+  return (
+    <Modal open={!!info} title={`🧊 ${info?.fromName ?? ''} 向你求助`} onClose={onClose}>
+      <p className="muted" style={{ fontSize: 13 }}>
+        秀英处于冰冻中：同意帮助需要交给她一张手牌（她的冰冻 -1，本回合可正常行动）；也可以拒绝。
+      </p>
+      <p className="muted" style={{ fontSize: 13, marginTop: 8 }}>
+        选择要交出的牌{ giveId ? '（已选 1 张）' : '（同意时必选）'}：
+      </p>
+      <div className="h-row" style={{ flexWrap: 'wrap', maxHeight: 220, overflowY: 'auto' }}>
+        {hand.map((c) => (
+          <CardView
+            key={c.instanceId}
+            def={c.def}
+            size="mini"
+            selected={giveId === c.instanceId}
+            onClick={() => setGiveId(giveId === c.instanceId ? null : c.instanceId)}
+          />
+        ))}
+        {hand.length === 0 && <span className="muted">你没有手牌，只能拒绝</span>}
+      </div>
+      <div className="h-row" style={{ marginTop: 16 }}>
+        <button
+          className="primary"
+          disabled={!giveId}
+          onClick={() => sendHelpRespond(true, giveId!)}
+        >
+          🤝 同意帮助（交出选中的牌）
+        </button>
+        <button onClick={onClose}>🙅 拒绝</button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Voyage：选自己要交出的 3 张手牌（对方随机 3 张） */
+function VoyageGiveModal({
+  info,
+  hand,
+  masked,
+  onClose,
+}: {
+  info: { skillId: string; targetSessionId: string; targetName: string } | null;
+  hand: HandCard[];
+  masked?: boolean;
+  onClose: () => void;
+}) {
+  const [give, setGive] = useState<string[]>([]);
+  const open = !!info;
+  useEffect(() => {
+    setGive([]);
+  }, [info]);
+  const toggle = (iid: string) =>
+    setGive((prev) =>
+      prev.includes(iid) ? prev.filter((x) => x !== iid) : prev.length >= 3 ? prev : [...prev, iid],
+    );
+  return (
+    <Modal open={open} title={`⚓ 选择要交给 ${info?.targetName ?? ''} 的 3 张牌`} onClose={onClose}>
+      <p className="muted" style={{ fontSize: 13 }}>
+        你交出的牌由你指定；对方交出的 3 张随机（双方手牌都需 ≥3 张）。已选 {give.length}/3
+      </p>
+      <div className="h-row" style={{ flexWrap: 'wrap', marginTop: 10 }}>
+        {hand.map((c) => (
+          <CardView
+            key={c.instanceId}
+            def={c.def}
+            size="mini"
+            masked={masked}
+            selected={give.includes(c.instanceId)}
+            onClick={() => toggle(c.instanceId)}
+          />
+        ))}
+      </div>
+      <div className="h-row" style={{ marginTop: 16 }}>
+        <button
+          className="primary"
+          disabled={give.length !== 3 || hand.length < 3}
+          onClick={() => {
+            if (!info) return;
+            sendAct({
+              action: 'useSkill',
+              skillId: info.skillId,
+              targetSessionId: info.targetSessionId,
+              costInstanceIds: give,
+            });
+            onClose();
+          }}
+        >
+          ⚓ 确认交换（回合结束）
+        </button>
+        <button onClick={onClose}>取消</button>
+      </div>
+    </Modal>
+  );
+}
+
+/** 自计时 hook：仅在组件挂载期间每 250ms 触发（避免整页定时器） */
+function useTick(): number {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, []);
+  return now;
+}
+
+/** 行动条上的回合倒计时角标 */
+function TurnCountBadge({ endsAt }: { endsAt: number }) {
+  const now = useTick();
+  const sec = Math.max(0, Math.ceil((endsAt - now) / 1000));
+  return <span className={`turn-count ${sec <= 10 ? 'is-urgent' : ''}`}>{sec}</span>;
+}
+
+/** 否认窗口倒计时 */
+function NopeCountBadge({ endsAt }: { endsAt: number }) {
+  const now = useTick();
+  const sec = Math.max(0, Math.ceil((endsAt - now) / 1000));
+  return <span className="nope-count">{sec}</span>;
+}
+
+/** 最后 10 秒红色警示（自计时，只在需要时挂载） */
+function TurnVignette({ endsAt }: { endsAt: number }) {
+  const now = useTick();
+  const sec = Math.ceil((endsAt - now) / 1000);
+  if (sec > 10) return null;
+  return <div className="turn-vignette" />;
+}
 
 function NamedComboButton({
   cardMap,
@@ -1040,9 +1537,52 @@ function NamedComboButton({
   );
 }
 
-function DefuseModal({ open, deckCount }: { open: boolean; deckCount: number }) {
+function DefuseModal({
+  open,
+  deckCount,
+  bananaMode,
+}: {
+  open: boolean;
+  deckCount: number;
+  bananaMode?: boolean;
+}) {
   const [pos, setPos] = useState(0);
-  useEffect(() => setPos(0), [open]);
+  const [cost, setCost] = useState<string[]>([]);
+  useEffect(() => {
+    setPos(0);
+    setCost([]);
+  }, [open]);
+  if (bananaMode) {
+    return (
+      <Modal open={open} title="🍌 4 张香蕉兑换拆解！">
+        <p className="muted" style={{ fontSize: 13 }}>
+          你没有拆解，但可以用 <strong>4 张手牌</strong>当作拆解（点选 4 张，已选 {cost.length}/4）
+        </p>
+        <p className="muted" style={{ fontSize: 13 }}>
+          爆炸猫放回第 <strong style={{ color: 'var(--gold)', fontSize: 18 }}>{pos}</strong> 张（0 =
+          牌堆顶）
+        </p>
+        <input
+          type="range"
+          min={0}
+          max={deckCount}
+          value={pos}
+          onChange={(e) => setPos(Number(e.target.value))}
+          style={{ width: '100%' }}
+        />
+        <BananaCostPicker count={4} cost={cost} setCost={setCost} />
+        <div className="h-row" style={{ marginTop: 16 }}>
+          <button
+            className="primary"
+            disabled={cost.length !== 4}
+            onClick={() => sendBananaSubstitute('defuse', cost, { position: pos })}
+          >
+            🍌 兑换拆解！
+          </button>
+        </div>
+      </Modal>
+    );
+  }
   return (
     <Modal open={open} title="🔧 拆解爆炸猫！选择放回位置">
       <p className="muted" style={{ fontSize: 13 }}>
@@ -1061,6 +1601,331 @@ function DefuseModal({ open, deckCount }: { open: boolean; deckCount: number }) 
         <button className="primary" onClick={() => sendAct({ action: 'defusePosition', position: pos })}>
           放回去！
         </button>
+      </div>
+    </Modal>
+  );
+}
+
+/** 香蕉代价多选器（小卡片行，点选 N 张） */
+function BananaCostPicker({
+  count,
+  cost,
+  setCost,
+}: {
+  count: number;
+  cost: string[];
+  setCost: (v: string[]) => void;
+}) {
+  const game = useGame();
+  return (
+    <div className="h-row" style={{ marginTop: 12, maxHeight: 200, overflowY: 'auto' }}>
+      {game.hand.map((c) => {
+        const idx = cost.indexOf(c.instanceId);
+        return (
+          <CardView
+            key={c.instanceId}
+            def={c.def}
+            size="mini"
+            masked
+            selected={idx >= 0}
+            onClick={() =>
+              setCost(
+                idx >= 0
+                  ? cost.filter((x) => x !== c.instanceId)
+                  : cost.length >= count
+                    ? cost
+                    : [...cost, c.instanceId],
+              )
+            }
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/** 香蕉女王：2 张香蕉兑换任意动作牌并立即打出 */
+function BananaExchangeModal({
+  open,
+  cardMap,
+  hand,
+  others,
+  initialCost,
+  onClose,
+}: {
+  open: boolean;
+  cardMap: Map<string, CardDef>;
+  hand: HandCard[];
+  others: any[];
+  /** 打开时带入的手牌区已选牌（作为兑换代价） */
+  initialCost?: string[];
+  onClose: () => void;
+}) {
+  const COST = 2;
+  const [cost, setCost] = useState<string[]>([]);
+  const [cardId, setCardId] = useState<string | null>(null);
+  useEffect(() => {
+    // 带入手牌区已选中的牌（最多 COST 张）
+    const pre = (initialCost ?? []).filter((iid) => hand.some((c) => c.instanceId === iid));
+    setCost(pre.slice(0, COST));
+    setCardId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+  const def = cardId ? cardMap.get(cardId) : null;
+  const needsTarget = !!def && cardNeedsTarget(def);
+  const actionCards = [...cardMap.values()].filter(
+    (c) => c.kind === 'action' && c.id !== 'nope',
+  );
+  return (
+    <Modal open={open} title="🍌 2 张香蕉 = 任意动作牌" onClose={onClose}>
+      <p className="muted" style={{ fontSize: 13 }}>
+        第一步：点选 2 张手牌作为代价（已选 {cost.length}/{COST}）
+      </p>
+      <BananaCostPicker count={COST} cost={cost} setCost={setCost} />
+      <p className="muted" style={{ fontSize: 13, marginTop: 14 }}>
+        第二步：选择要兑换打出的动作牌
+      </p>
+      <div className="h-row" style={{ maxHeight: 240, overflowY: 'auto' }}>
+        {actionCards.map((c) => (
+          <CardView
+            key={c.id}
+            def={c}
+            size="mini"
+            selected={cardId === c.id}
+            onClick={() => setCardId(c.id)}
+          />
+        ))}
+      </div>
+      {!needsTarget ? (
+        <div className="h-row" style={{ marginTop: 16 }}>
+          <button
+            className="primary"
+            disabled={cost.length !== COST || !cardId}
+            onClick={() => {
+              sendBananaSubstitute('action', cost, { cardId: cardId! });
+              onClose();
+            }}
+          >
+            🍌 兑换打出！
+          </button>
+        </div>
+      ) : (
+        <div style={{ marginTop: 16 }}>
+          <p className="muted" style={{ fontSize: 13 }}>
+            这张牌需要目标，选择一名玩家即兑换打出：
+          </p>
+          <div className="h-row">
+            {others.map((p) => (
+              <button
+                key={p.sessionId}
+                className="primary"
+                disabled={cost.length !== COST || !cardId}
+                onClick={() => {
+                  sendBananaSubstitute('action', cost, {
+                    cardId: cardId!,
+                    targetSessionId: p.sessionId,
+                  });
+                  onClose();
+                }}
+              >
+                {p.name}（{p.handCount} 张）
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <p className="muted" style={{ fontSize: 12, marginTop: 12 }}>
+        （你的手牌：{hand.length} 张；兑换后立即生效，可被否认）
+      </p>
+    </Modal>
+  );
+}
+/** 大眼Nana：揭发展示目标牌面（view 关闭即结束；discard/steal 点选一张提交） */
+function ExposeModal({
+  info,
+}: {
+  info: GameSnapshot['exposePrompt'];
+}) {
+  if (!info) return null;
+  const pick = info.mode !== 'view';
+  return (
+    <Modal
+      open
+      title={`👀 揭发 ${info.targetName}！`}
+      onClose={() => clearExposePrompt()}
+    >
+      <p className="muted" style={{ fontSize: 13 }}>
+        {info.mode === 'view'
+          ? `你看到了 ${info.targetName} 的全部手牌（2 个档案）：`
+          : info.mode === 'discard'
+            ? `3 个档案：点选一张让 ${info.targetName} 弃掉：`
+            : `4 个档案：点选一张抽到你手中：`}
+      </p>
+      <div className="h-row" style={{ maxHeight: 260, overflowY: 'auto' }}>
+        {info.cards.map((c) => (
+          <CardView
+            key={c.instanceId}
+            def={c.def}
+            size="mini"
+            onClick={pick ? () => sendExposePick(c.instanceId) : undefined}
+          />
+        ))}
+        {info.cards.length === 0 && <span className="muted">对方没有手牌</span>}
+      </div>
+      {info.mode === 'view' && (
+        <div className="h-row" style={{ marginTop: 14 }}>
+          <button className="primary" onClick={() => clearExposePrompt()}>
+            知道了
+          </button>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/** Future女王：命运改写（选激活 + 手牌替换 + 排序放回） */
+function FutureRewriteModal({
+  cards,
+  hand,
+  others,
+}: {
+  cards: CardDef[] | null;
+  hand: HandCard[];
+  others: any[];
+}) {
+  const [activateIdx, setActivateIdx] = useState<number | null>(null);
+  const [swapId, setSwapId] = useState<string | null>(null);
+  const [order, setOrder] = useState<number[]>([]);
+  const [targetId, setTargetId] = useState<string | null>(null);
+  useEffect(() => {
+    setActivateIdx(null);
+    setSwapId(null);
+    setOrder([]);
+    setTargetId(null);
+  }, [cards]);
+  if (!cards) return null;
+  const n = cards.length;
+  const activated = activateIdx != null ? cards[activateIdx] : null;
+  const needsTarget = !!activated && cardNeedsTarget(activated);
+  // 候选 = 未激活的 (n-1) 张 + 交换手牌（索引 n-1）
+  const candidates = cards.filter((_, i) => i !== activateIdx);
+  const ready =
+    activateIdx != null &&
+    swapId != null &&
+    order.length === n &&
+    (!needsTarget || !!targetId);
+  const submit = () => {
+    sendFutureRewritePick({
+      activateIdx: activateIdx!,
+      swapInstanceId: swapId!,
+      order,
+      targetSessionId: targetId ?? undefined,
+    });
+  };
+  return (
+    <Modal open title="🌠 命运改写" onClose={() => clearFutureRewritePrompt()}>
+      <p className="muted" style={{ fontSize: 13 }}>
+        第一步：点选 1 张<strong>立即生效</strong>的牌（等同你亲自打出）
+      </p>
+      <div className="h-row">
+        {cards.map((c, i) => (
+          <div key={i} style={{ textAlign: 'center' }}>
+            <CardView
+              def={c}
+              size="mini"
+              selected={activateIdx === i}
+              onClick={() => {
+                setActivateIdx(i);
+                setOrder([]);
+                setTargetId(null);
+              }}
+            />
+          </div>
+        ))}
+      </div>
+      <p className="muted" style={{ fontSize: 13, marginTop: 12 }}>
+        第二步：选 1 张<strong>手牌</strong>替换进去
+      </p>
+      <div className="h-row" style={{ maxHeight: 180, overflowY: 'auto' }}>
+        {hand.map((c) => (
+          <CardView
+            key={c.instanceId}
+            def={c.def}
+            size="mini"
+            selected={swapId === c.instanceId}
+            onClick={() => {
+              setSwapId(c.instanceId);
+              setOrder([]);
+            }}
+          />
+        ))}
+      </div>
+      {activateIdx != null && swapId != null && (
+        <>
+          <p className="muted" style={{ fontSize: 13, marginTop: 12 }}>
+            第三步：按<strong>自顶向下</strong>的顺序点选放回（第 {order.length}/{n} 张）
+          </p>
+          <div className="h-row">
+            {candidates.map((c, i) => (
+              <div key={i} style={{ textAlign: 'center' }}>
+                <CardView
+                  def={c}
+                  size="mini"
+                  selected={order.includes(i)}
+                  onClick={() =>
+                    setOrder((prev) =>
+                      prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i],
+                    )
+                  }
+                />
+                <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                  {order.includes(i) ? `第 ${order.indexOf(i) + 1} 位` : ''}
+                </div>
+              </div>
+            ))}
+            <div style={{ textAlign: 'center' }}>
+              <CardView
+                def={hand.find((c) => c.instanceId === swapId)?.def}
+                size="mini"
+                selected={order.includes(candidates.length)}
+                onClick={() =>
+                  setOrder((prev) =>
+                    prev.includes(candidates.length)
+                      ? prev.filter((x) => x !== candidates.length)
+                      : [...prev, candidates.length],
+                  )
+                }
+              />
+              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                🖐 你的交换牌
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+      {needsTarget && activated && (
+        <>
+          <p className="muted" style={{ fontSize: 13, marginTop: 12 }}>
+            【{activated.name}】需要目标：
+          </p>
+          <div className="h-row">
+            {others.map((p) => (
+              <button
+                key={p.sessionId}
+                className={targetId === p.sessionId ? 'primary' : ''}
+                onClick={() => setTargetId(p.sessionId)}
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <div className="h-row" style={{ marginTop: 16 }}>
+        <button className="primary" disabled={!ready} onClick={submit}>
+          改写命运！
+        </button>
+        <button onClick={() => clearFutureRewritePrompt()}>放弃（冷却已扣）</button>
       </div>
     </Modal>
   );

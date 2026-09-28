@@ -63,6 +63,8 @@ describe('World Rule：传递快乐', () => {
   it('回合开始时随机一张传给下家', () => {
     const e = setup();
     start(e, { worldRuleId: 'pass-joy' });
+    // 只关心传牌流转：移除爆炸猫，保证摸牌推进回合必定安全
+    e.deck = e.deck.filter((c) => c.cardId !== 'exploding');
     const p = cur(e);
     const nextId = e.turnOrder[(e.turnIndex + 1) % e.turnOrder.length]!;
     const next = e.players.find((x) => x.sessionId === nextId)!;
@@ -256,7 +258,7 @@ describe('无尽挑战增益', () => {
   it('额外爆炸猫：牌堆多 N 张', () => {
     const e = setup();
     start(e, { worldRuleId: null, extraExploding: 1 });
-    // 3 人局基础 2 + 1 = 3
-    expect(e.deck.filter((c) => c.cardId === 'exploding')).toHaveLength(3);
+    // 3 人局基础 5（人数+2）+ 1 = 6
+    expect(e.deck.filter((c) => c.cardId === 'exploding')).toHaveLength(6);
   });
 });

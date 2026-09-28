@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { CardDef } from '@bombcat/shared';
 import { CardView } from '../CardView';
@@ -8,8 +9,22 @@ export interface StageShow {
   byName: string;
   cards: CardDef[];
   noped: boolean;
-  /** 否认窗口进行中（持续展示 + 倒计时秒数） */
-  countdown?: number;
+  /** 目标型效果的目标名（"→ 🎯谁"） */
+  targetName?: string;
+  /** 否认窗口截止时间（进行中持续展示 + 倒计时秒数；内部自计时） */
+  countdownEndsAt?: number;
+}
+
+/** 自计时秒数（只在挂载期间 tick，不牵动父组件） */
+function CountdownSeconds({ endsAt }: { endsAt: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, []);
+  const sec = Math.max(0, Math.ceil((endsAt - now) / 1000));
+  if (sec <= 0) return null;
+  return <div className="stage-countdown">{sec}</div>;
 }
 
 /**
@@ -48,6 +63,12 @@ export function Stage({ show }: { show: StageShow | null }) {
             </div>
             <div className="stage-caption">
               <span className="stage-by">{show.byName}</span> 打出
+              {show.targetName && (
+                <>
+                  {' → '}
+                  <span className="stage-target">🎯{show.targetName}</span>
+                </>
+              )}
             </div>
             {show.noped && (
               <motion.div
@@ -59,8 +80,8 @@ export function Stage({ show }: { show: StageShow | null }) {
                 NOPE!
               </motion.div>
             )}
-            {show.countdown !== undefined && show.countdown > 0 && (
-              <div className="stage-countdown">{show.countdown}</div>
+            {show.countdownEndsAt !== undefined && show.countdownEndsAt > 0 && (
+              <CountdownSeconds endsAt={show.countdownEndsAt} />
             )}
           </motion.div>
         )}

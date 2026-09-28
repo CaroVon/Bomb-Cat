@@ -73,11 +73,12 @@
     {
       "id": "voyage-skill",
       "name": "大海胸怀无量",
-      "description": "选择任意一名玩家，和对方交换全部手牌，回合结束。每局一次。",
+      "description": "选择一名玩家，双方各随机选 3 张手牌互换（双方手牌均需 ≥3 张），回合立即结束。冷却 5 回合。",
       "trigger": "active",
       "effect": {
-        "kind": "None",
-        "uses": 1
+        "kind": "voyageSwap",
+        "count": 3,
+        "cooldownTurns": 5
       }
     }
   ]
@@ -130,14 +131,17 @@
     {
       "id": "banana-skill",
       "name": "大香蕉之怒",
-      "description": "1. Banana可以在自己没有拆解牌后使用大香蕉之怒；
-                    2. 发动大香蕉之怒后，场上所有人的手牌蒙上香蕉牌图案，持续3个回合，这三个回合的摸牌均显示为香蕉牌（底牌不变）；
-                    3. 其他玩家一局可以打出一张香蕉牌，打出后触发原有牌面的效果，且必须进入弃牌堆；大香蕉可以将4张香蕉牌作为拆解使用，三张香蕉牌作为任意技能牌",
+      "description": "1. Banana可以在自己没有拆解牌后使用大香蕉之怒（整局 3 次，冷却 3 回合，覆盖期间不能再次发动）；
+                    2. 发动大香蕉之怒后，场上所有人的手牌蒙上香蕉牌图案并洗乱，持续一轮（所有存活玩家各行动一次），这一轮摸到的牌均显示为香蕉牌（底牌不变）；
+                    3. 覆盖期间所有人只能盲打单牌（卡面/边框完全统一，看不出牌种）：普通小猫/拆解/否认打出后无效果直接进弃牌堆，动作牌触发原有效果（需要目标时随机指定）；
+                    4. 覆盖期间同名猫组合被禁用；香蕉女王本人无法直接出牌——她可以指定选中的 2 张香蕉牌作为任意技能牌打出，4 张香蕉牌作为拆解使用",
       "trigger": "active",
       "effect": {
-        "kind": "None",
-        "uses": 1
-      }
+        "kind": "bananaRage",
+        "overlayTurns": 1,
+        "uses": 3
+      },
+      "cooldownTurns": 3
     }
   ]
 }
@@ -221,6 +225,116 @@
         "kind": "None",
         "uses": -1
       }
+    }
+  ]
+}
+```
+
+```json
+{
+  "id": "bigEye",
+  "name": "大眼Nana",
+  "title": "张兵监视者",
+  "emoji": "👀",
+  "role": "trickster",
+  "themeColor": "#9c05f3f7",
+  "difficulty": 2,
+  "lore": "她的双眼一直注视着每一位小猫，不要轻易和她对视。",
+  "portrait": "D:\dev\bombcat\client\public\assets\characters\big_eye.jpg",
+  "skills": [
+    {
+      "id": "big_eye-skill",
+      "name": "揭发",
+      "description": "1. 被动：每当一名其他玩家使用一张功能牌时（不包括拆解，包括多张猫咪的技能），在该玩家面前放置一个“档案”标记，上限4个档案，监视者无法使用求赠和偷牌效果；
+                    2. 主动：选择一名玩家，根据该玩家档案的数量，执行相应效果：
+                    - 2个档案：查看该玩家的牌面
+                    - 3个档案：查看该玩家的牌面，指定该玩家弃掉一张牌
+                    - 4个档案：查看该玩家的牌面，抽取一张牌
+                    冷却时间3回合",
+      "trigger": "active",
+      "effect": {
+        "kind": "None",
+        "uses": -1
+      }
+    }
+  ]
+}
+```
+
+```json
+{
+  "id": "soup",
+  "name": "数学老师",
+  "title": "Super Soup",
+  "emoji": "📐",
+  "role": "support",
+  "themeColor": "#075bf5f7",
+  "difficulty": 2,
+  "lore": "准备好上课了吗孩子们，下面老师要讲这个公式了。",
+  "portrait": "D:\dev\bombcat\client\public\assets\characters\soup.jpg",
+  "skills": [
+    {
+      "id": "soup-skill",
+      "name": "计算",
+      "description": "四则运算（四个子技能各自独立冷却 4 回合，都不能指定自己）：
+                    1. 加法：指定一位玩家立即摸一张牌（走正常摸牌管线：爆炸猫→拆解、受猪王暴食/减法影响，不结束其回合）；
+                    2. 减法：指定一名玩家下一次摸牌少摸一张（最少 0 张）；
+                    3. 乘法：指定一位玩家下一张功能牌（攻击/跳过/洗牌/求赠/预知未来/同名猫组合等）效果触发两次；
+                    4. 除法：指定一位玩家下一张功能牌无法触发（直接进弃牌堆）；与乘法同时存在时除法优先。
+                    所有标记对全场可见（座位角标 ➖/✖️/➗）。",
+      "trigger": "active",
+      "effect": { "kind": "mathOp", "op": "add | sub | mul | div", "cooldownTurns": 4 }
+    }
+  ]
+}
+```
+
+```json
+{
+  "id": "xiuying",
+  "name": "秀英",
+  "title": "冰冻荔枝老奶",
+  "emoji": "🧙‍♀️",
+  "role": "support",
+  "themeColor": "#fafaf7f7",
+  "difficulty": 2,
+  "lore": "救救我孩子们，奶奶给你好吃的荔枝。",
+  "portrait": "D:\dev\bombcat\client\public\assets\characters\ice.png",
+  "skills": [
+    {
+      "id": "ice-skill",
+      "name": "拯救老奶",
+      "description": "1. 被动·冰冻老奶：开局 10 层冰冻，无法出牌和摸牌，且不受任何技能影响（被主动技指定时技能无效，但冰冻 -1）；只有被帮助/被技能指定才能减层，减到 0 后恢复正常；
+                    2. 主动·救救老奶（冰冻时可用）：指定一名玩家求助，对方可拒绝或同意（同意则由对方自选一张牌交给你）——成功帮助后冰冻 -1，且本回合可以正常出牌和摸牌；被拒后可继续问其他人（同一人本回合不能重复问），回应超时 15 秒视为拒绝；
+                    3. 主动·乖孩子（解冻时可用，每回合 1 次）：喂给一名其他玩家一颗荔枝（不能喂自己），集齐 2 颗荔枝的玩家随机获得一张普通小猫牌，荔枝清零。
+                    冰冻期间被卡牌指定（偷牌/求赠/看牌等）照常生效。",
+      "trigger": "active",
+      "effect": { "kind": "iceFrozen | iceHelp | iceLychee", "layers": 10, "perTurn": 1 }
+    }
+  ]
+}
+```
+
+```json
+{
+  "id": "apple",
+  "name": "邪恶苹果头",
+  "title": "Evil Apple",
+  "emoji": "🍎",
+  "role": "aggressive",
+  "themeColor": "#fc2104f7",
+  "difficulty": 1,
+  "lore": "参见女王大人。",
+  "portrait": "D:\dev\bombcat\client\public\assets\characters\apple.jpg",
+  "apple_portrait": "D:\dev\bombcat\client\public\assets\characters\evil_apple.jpg",
+  "skills": [
+    {
+      "id": "apple-skill",
+      "name": "苹果",
+      "description": "1. 被动：开局公开公告，并往牌堆随机位置藏 1 张「爆炸苹果」——其他玩家摸到等同摸到爆炸猫（有拆解就拆解，拆解后仍以爆炸苹果身份回到牌堆；香蕉女王同样可用 4 张香蕉兑换）；邪恶苹果头本人摸到时可以悄悄把它放回牌堆（插在非顶位置）并再摸一张；
+                    2. 主动：指定一位没有苹果的玩家投掷邪恶苹果（每人最多 1 个），冷却 5 回合——被投掷者可以在自己回合内随时吃掉它（交出一张手牌给苹果头，苹果消失）；不吃的话苹果存在 3 个回合，第 4 个回合开始时变成爆炸苹果混入牌堆（牌堆里的爆炸苹果数量会因此累积）。",
+      "trigger": "active",
+      "effect": { "kind": "appleBomb | appleThrow", "count": 1, "cooldownTurns": 5 }
     }
   ]
 }

@@ -21,18 +21,39 @@ export const PlayerState = schema(
     skillUsesLeft: t.map('number'),
     /** 技能冷却剩余回合（skillId -> 回合数） */
     skillCooldowns: t.map('number'),
-    /** Pig King：消化中的卡牌名（空=无） */
-    digestionCardName: t.string().default(''),
-    /** Pig King：消化剩余回合 */
+    /** Pig King：消化剩余回合（消化中的卡名是隐藏信息，不进公开状态） */
     digestionTurns: t.number().default(0),
     /** Pig King：饱腹剩余回合 */
     fullTurns: t.number().default(0),
     /** Pig King：消化次数 */
     digestCount: t.number().default(0),
+    /** Pig King：必须先打出/丢弃的消化牌（空=无） */
+    mustPlayIid: t.string().default(''),
+    /** bigEye：该玩家被积累的档案数（0-4） */
+    archives: t.uint8().default(0),
     /** Banana：愤怒形态 */
     isAngry: t.boolean().default(false),
     /** Nana：永久死亡 */
     permanentDead: t.boolean().default(false),
+    /* ---- v3：数学老师 / 秀英 ---- */
+    /** 数学老师：减法标记（下次摸牌少摸 1 张） */
+    mathSubDraw: t.uint8().default(0),
+    /** 数学老师：乘法标记（下张功能牌触发两次） */
+    mathMulNext: t.uint8().default(0),
+    /** 数学老师：除法标记（下张功能牌无法触发） */
+    mathDivNext: t.uint8().default(0),
+    /** 秀英：冰冻层数（0=已解冻） */
+    freezeLayers: t.uint8().default(0),
+    /** 秀英：本回合获得过帮助（可正常行动） */
+    helpedThisTurn: t.boolean().default(false),
+    /** 秀英：荔枝数（0-2） */
+    lychees: t.uint8().default(0),
+    /** 秀英：本回合已求助过的玩家（公开：日志里本就可见） */
+    askedHelp: t.array('string'),
+    /** 秀英：本回合已喂出的荔枝数 */
+    lycheeGiven: t.uint8().default(0),
+    /** 邪恶苹果头：身上的邪恶苹果剩余回合（0=没有） */
+    appleTurns: t.uint8().default(0),
   },
   'PlayerState',
 );
@@ -70,6 +91,9 @@ export const GameState = schema(
     lastPlayCards: t.array('string'),
     lastPlayAt: t.number().default(0),
     lastPlayNoped: t.boolean().default(false),
+    /** 最近一次出牌的目标（舞台"→ 谁"与目标座位脉冲） */
+    lastPlayTargetId: t.string().default(''),
+    lastPlayTargetName: t.string().default(''),
 
     /** 最近一次阵亡（爆炸演出） */
     lastDeathBy: t.string().default(''),
@@ -97,12 +121,17 @@ export const GameState = schema(
     worldRuleEmoji: t.string().default(''),
 
     /* ---- v2：五角色新公开状态 ---- */
-    /** Banana 大香蕉之怒：剩余覆盖回合数 */
+    /** Banana 大香蕉之怒：剩余覆盖轮数（1 轮 = 所有存活玩家各行动一次） */
     bananaOverlayTurns: t.number().default(0),
     /** chaos_queen 混沌之触是否激活 */
     chaosDrawsActive: t.boolean().default(false),
     /** 当前眼泪处理者（空=无） */
     tearPendingBy: t.string().default(''),
+    /* ---- v3 ---- */
+    /** 秀英求助中：正在等待回应的被求助者（空=无） */
+    helpPendingBy: t.string().default(''),
+    /** 秀英求助中：求助者（空=无） */
+    helpOwnerId: t.string().default(''),
   },
   'GameState',
 );

@@ -48,15 +48,18 @@ export class GameRoom extends Room<{ state: GameState }> {
   static botDelayMs = 1500;
   /** 否认窗口毫秒（测试可覆盖；未来可做房间快速模式开关） */
   static nopeWindowMs = NOPE_WINDOW_MS;
+  /** 秀英求助回应窗口毫秒（测试可覆盖） */
+  static helpWindowMs = 15_000;
 
   maxClients = MAX_PLAYERS;
-  patchRate = 50;
+  patchRate = 100;
 
   private engine = new GameEngine();
   private pendingDeck: DeckDef | null = null;
   private nopeTimer: ReturnType<typeof setTimeout> | null = null;
   private turnTimer: Delayed | null = null;
   private botTimer: Delayed | null = null;
+  private helpTimer: Delayed | null = null;
   /** 机器人玩家的 sessionId 集合 */
   private botIds = new Set<string>();
   /** 机器人通过 peek 获得的牌堆顶记忆（不作弊读牌） */
@@ -70,6 +73,8 @@ export class GameRoom extends Room<{ state: GameState }> {
     extraExploding?: number;
   } = {};
   private quickStarted = false;
+  /** 人机练习/无尽挑战：bot 是否已随首位真人加入 */
+  private botsSeeded = false;
   /** 玩家个人构筑（sessionId -> 10 张 cardId） */
   private pendingBuilds: Record<string, string[]> = {};
 
@@ -100,22 +105,9 @@ export class GameRoom extends Room<{ state: GameState }> {
       this.broadcast('emote', { sessionId: client.sessionId, name: p.name, emoji });
     });
 
-    // 人机练习：补 bot 但不自动开局（玩家需要选角色/构筑后手动开始）
-    if (this.roomMode.bots && this.roomMode.bots > 0 && this.roomMode.run) {
-      // 无尽挑战：roguelike 不需要选角，自动开局
-      this.clock.setTimeout(() => {
-        if (this.engine.phase !== 'lobby') return;
-        this.addBots(this.roomMode.bots!);
-        this.autoStart();
-      }, 500);
-    } else if (this.roomMode.bots && this.roomMode.bots > 0) {
-      // 人机练习：只补 bot，等待玩家手动开始
-      this.clock.setTimeout(() => {
-        if (this.engine.phase !== 'lobby') return;
-        this.addBots(this.roomMode.bots!);
-      }, 500);
-    } else if (this.roomMode.quick) {
-      // 快速匹配：15 秒内凑不满 2 人则补 bot 开局
+    // 人机练习 / 无尽挑战：等首位真人加入后再补 bot（直接延时会在慢网络下让 bot 抢走房主）
+    // 快速匹配：15 秒内凑不满 2 人则补 bot 开局
+    if (this.roomMode.quick) {
       this.clock.setTimeout(() => {
         if (this.engine.phase !== 'lobby') return;
         if (this.engine.players.length < 2) this.addBots(2);
@@ -138,6 +130,19 @@ export class GameRoom extends Room<{ state: GameState }> {
     const events = this.engine.addPlayer(client.sessionId, auth.userId, auth.name);
     events.push(...this.engine.setConnected(client.sessionId, true));
     this.process(events);
+
+    // 人机练习：首位真人入座后补 bot（无尽挑战补完自动开局）
+    if (
+      !this.botsSeeded &&
+      this.roomMode.bots &&
+      this.roomMode.bots > 0 &&
+      this.engine.phase === 'lobby'
+    ) {
+      this.botsSeeded = true;
+      this.addBots(this.roomMode.bots);
+      if (this.roomMode.run) this.autoStart();
+    }
+
     if (this.engine.phase === 'playing') {
       this.sendHand(client.sessionId);
     }
@@ -190,6 +195,7 @@ export class GameRoom extends Room<{ state: GameState }> {
     if (this.nopeTimer) clearTimeout(this.nopeTimer);
     this.turnTimer?.clear();
     this.botTimer?.clear();
+    this.helpTimer?.clear();
     activeCodes.delete(this.state.roomCode);
   }
 
@@ -204,9 +210,15 @@ export class GameRoom extends Room<{ state: GameState }> {
       this.state.turnEndsAt = 0;
       return;
     }
-    // 否认窗口有独立的 8 秒计时，不叠回合计时
-    if (this.engine.subPhase === 'awaiting-nope') {
+    // 否认窗口有独立的 8 秒计时；命运改写是技能的延伸交互，同样暂停回合计时给思考时间
+    if (this.engine.subPhase === 'awaiting-nope' || this.engine.futureRewritePending) {
       this.state.turnEndsAt = 0;
+      return;
+    }
+    // 秀英求助：等待被求助者回应期间暂停回合计时（有独立的 15 秒回应窗口）
+    if (this.engine.helpPending) {
+      this.state.turnEndsAt = 0;
+      this.armHelpTimer();
       return;
     }
     this.state.turnEndsAt = this.clock.currentTime + GameRoom.turnTimeoutMs;
@@ -218,9 +230,57 @@ export class GameRoom extends Room<{ state: GameState }> {
     this.armBotLoop();
   }
 
-  private autoActOnTimeout(): void {
-    const e = this.engine;
+  /** 秀英求助回应窗口计时（超时自动拒绝） */
+  private armHelpTimer(): void {
+    this.helpTimer?.clear();
+    this.helpTimer = null;
+    if (!this.engine.helpPending) return;
+    this.helpTimer = this.clock.setTimeout(() => {
+      this.helpTimer = null;
+      this.process(this.engine.autoRefuseHelp());
+      this.sync();
+      this.armTurnTimer();
+    }, GameRoom.helpWindowMs);
+  }
+
+  /** 机器人回应求助：手牌 ≥3 张时较可能同意，交出手里价值最低的一张 */
+  private scheduleBotHelpResponse(botSessionId: string): void {
+    const delay = GameRoom.botDelayMs * (0.5 + Math.random() * 0.5);
+    this.clock.setTimeout(() => {
+      const pending = this.engine.pendingHelpInfo;
+      if (!pending || pending.helperSessionId !== botSessionId) return;
+      const bot = this.engine.players.find((p) => p.sessionId === botSessionId);
+      if (!bot || !bot.alive || bot.hand.length === 0) {
+        this.process(this.engine.handleHelpRespond(botSessionId, { accept: false }));
+        this.sync();
+        this.armTurnTimer();
+        return;
+      }
+      // 简单启发式：手里牌多就更愿意帮忙；给出价值最低的一张（普通猫优先）
+      const willing = bot.hand.length >= 3 && Math.random() < 0.7;
+      if (!willing) {
+        this.process(this.engine.handleHelpRespond(botSessionId, { accept: false }));
+      } else {
+        const plain = bot.hand.find((c) => this.engine.cardMap.get(c.cardId)?.kind === 'plain');
+        const give = plain ?? bot.hand[bot.hand.length - 1]!;
+        this.process(
+          this.engine.handleHelpRespond(botSessionId, { accept: true, giveInstanceId: give.iid }),
+        );
+      }
+      this.sync();
+      this.armTurnTimer();
+    }, delay);
+  }
+
+  private autoActOnTimeout(): void {    const e = this.engine;
     if (e.phase !== 'playing') return;
+    // 秀英求助：超时视为拒绝
+    if (e.helpPending) {
+      this.process(e.autoRefuseHelp());
+      this.sync();
+      this.armTurnTimer();
+      return;
+    }
     const cur = e.current();
     if (!cur || !cur.connected) {
       // 当前玩家掉线：交给重连判死流程，不替他行动
@@ -228,9 +288,19 @@ export class GameRoom extends Room<{ state: GameState }> {
       return;
     }
     if (e.subPhase === 'awaiting-action') {
-      this.process(e.drawCard(cur.sessionId)); // 超时自动摸牌结束回合
-    } else if (e.subPhase === 'awaiting-defuse' && e.pendingDefuse?.sessionId === cur.sessionId) {
-      this.process(e.defusePosition(cur.sessionId, 0)); // 放回牌堆顶
+      // 猪王必须打出消化牌：超时自动丢弃，避免卡死
+      if (cur.mustPlayIid) {
+        this.process(e.handleDigestPlay(cur.sessionId, { instanceId: cur.mustPlayIid }));
+      } else {
+        this.process(e.drawCard(cur.sessionId)); // 超时自动摸牌结束回合
+      }
+    } else if (e.subPhase === 'awaiting-defuse') {
+      // 拆解超时：放回牌堆顶（香蕉兑换待处理则自动用前 4 张兑换）
+      this.process(e.autoDefuseOnTimeout(cur.sessionId));
+    } else if (e.subPhase === 'awaiting-tear') {
+      // 眼泪选择超时：自动拒绝（摸 2 张，眼泪回堆顶）
+      const tearOwner = e.pendingTear?.sessionId ?? cur.sessionId;
+      this.process(e.handleTearChoice(tearOwner, { accept: false }));
     } else if (
       e.subPhase === 'awaiting-alter' &&
       e.pendingAlter?.sessionId === cur.sessionId
@@ -292,6 +362,27 @@ export class GameRoom extends Room<{ state: GameState }> {
       this.actAs(cur.sessionId, { action: 'defusePosition', position: decision.position });
     } else if (decision.kind === 'alter') {
       this.actAs(cur.sessionId, { action: 'alterFuture', order: decision.order });
+    } else if (decision.kind === 'bananaAction') {
+      // 香蕉女王：覆盖期间用 2 张香蕉兑换技能牌
+      this.actAs(cur.sessionId, {
+        action: 'bananaSubstitute',
+        mode: 'action',
+        cardId: decision.cardId,
+        costInstanceIds: decision.costInstanceIds,
+      });
+    } else if (decision.kind === 'iceHelp') {
+      // 秀英：冰冻中向其他玩家求助
+      const helpSkillId =
+        e.characterMap.get(cur.characterId)?.skills.find((s) => s.effect.kind === 'iceHelp')?.id ??
+        'ice-help';
+      this.actAs(cur.sessionId, {
+        action: 'useSkill',
+        skillId: helpSkillId,
+        targetSessionId: decision.targetSessionId,
+      });
+    } else if (decision.kind === 'appleEat') {
+      // 邪恶苹果头：吃掉身上的苹果
+      this.actAs(cur.sessionId, { action: 'appleEat', giveInstanceId: decision.giveInstanceId });
     } else {
       const playedCardId = String(decision.instanceId.split('#')[0]);
       this.actAs(cur.sessionId, {
@@ -320,6 +411,13 @@ export class GameRoom extends Room<{ state: GameState }> {
   private actAs(sid: string, message: ClientMessage): void {
     switch (message.action) {
       case 'startGame': {
+        // 普通联机房：真人不足 fillTo 时自动补机器人到目标人数（练习/快速匹配/无尽模式不受影响）
+        if (!this.roomMode.bots && !this.roomMode.quick && !this.roomMode.run) {
+          const fillTo = Math.min(Math.max(message.fillTo ?? 0, 0), MAX_PLAYERS);
+          if (fillTo >= 2 && this.engine.players.length < fillTo) {
+            this.addBots(fillTo - this.engine.players.length);
+          }
+        }
         const events = this.engine.startGame(sid, this.pendingDeck, {
           builds: this.pendingBuilds,
           runBonuses: this.roomMode.run ? { [sid]: this.roomMode.runBonuses ?? [] } : undefined,
@@ -432,6 +530,18 @@ export class GameRoom extends Room<{ state: GameState }> {
         this.process(this.engine.handleDigestPlay(sid, message));
         break;
       }
+      case 'exposePick': {
+        this.process(this.engine.handleExposePick(sid, message));
+        break;
+      }
+      case 'helpRespond': {
+        this.process(this.engine.handleHelpRespond(sid, message));
+        break;
+      }
+      case 'appleEat': {
+        this.process(this.engine.handleAppleEat(sid, message));
+        break;
+      }
       default: {
         const never: never = message;
         void never;
@@ -461,6 +571,13 @@ export class GameRoom extends Room<{ state: GameState }> {
               (c) => c.id,
             ) ?? null;
           }
+          // 求助请求发给 bot：延时自动应答（规则启发式，非作弊）
+          if (
+            this.botIds.has(e.sessionId) &&
+            (e.message as { action?: string }).action === 'helpPrompt'
+          ) {
+            this.scheduleBotHelpResponse(e.sessionId);
+          }
           this.sendPrivate(e.sessionId, e.message);
           break;
         case 'invalid':
@@ -486,6 +603,13 @@ export class GameRoom extends Room<{ state: GameState }> {
             this.nopeTimer = null;
           }
           this.state.nopeEndsAt = 0;
+          break;
+        }
+        case 'awaitingHelp':
+          break;
+        case 'helpResolved': {
+          this.helpTimer?.clear();
+          this.helpTimer = null;
           break;
         }
         case 'gameEnd': {
@@ -584,6 +708,8 @@ export class GameRoom extends Room<{ state: GameState }> {
     s.bananaOverlayTurns = e.bananaOverlayTurns;
     s.chaosDrawsActive = e.chaosDrawsActive;
     s.tearPendingBy = e.pendingTear?.sessionId ?? '';
+    s.helpPendingBy = e.pendingHelpInfo?.helperSessionId ?? '';
+    s.helpOwnerId = e.pendingHelpInfo?.ownerSessionId ?? '';
     s.turnIndex = e.turnIndex;
     s.direction = e.direction;
     s.deckCount = e.deck.length;
@@ -600,6 +726,9 @@ export class GameRoom extends Room<{ state: GameState }> {
     GameRoom.syncArray(s.lastPlayCards, lp?.cardIds ?? []);
     s.lastPlayAt = lp?.at ?? 0;
     s.lastPlayNoped = lp?.noped ?? false;
+    s.lastPlayTargetId = lp?.targetSessionId ?? '';
+    s.lastPlayTargetName =
+      e.players.find((p) => p.sessionId === lp?.targetSessionId)?.name ?? '';
     s.lastDeathBy = e.lastDeath?.name ?? '';
     s.lastDeathAt = e.lastDeath?.at ?? 0;
 
@@ -643,13 +772,24 @@ export class GameRoom extends Room<{ state: GameState }> {
         ps.isHost = ep.sessionId === e.hostSessionId;
         ps.buildReady = !!this.pendingBuilds[ep.sessionId];
 
-        // v2：新状态同步
+        // v2：新状态同步（消化中的卡名是隐藏信息，不进公开 schema；消化完成经 digestReady 私密告知）
         ps.isAngry = ep.isAngry;
         ps.permanentDead = ep.permanentDead;
         ps.fullTurns = ep.fullTurns;
         ps.digestCount = ep.digestCount;
-        ps.digestionCardName = ep.digestion ? this.engine.cardMap.get(ep.digestion.card.cardId)?.name ?? '' : '';
         ps.digestionTurns = ep.digestion?.turnsLeft ?? 0;
+        ps.mustPlayIid = ep.mustPlayIid ?? '';
+        ps.archives = ep.archives;
+        // v3：数学老师 / 秀英
+        ps.mathSubDraw = ep.mathSubDraw;
+        ps.mathMulNext = ep.mathMulNext;
+        ps.mathDivNext = ep.mathDivNext;
+        ps.freezeLayers = ep.freezeLayers;
+        ps.helpedThisTurn = ep.helpedThisTurn;
+        ps.lychees = ep.lychees;
+        ps.lycheeGiven = ep.lycheeGivenThisTurn;
+        ps.appleTurns = ep.appleTurns;
+        GameRoom.syncArray(ps.askedHelp, ep.askedHelp);
 
         // 技能冷却同步
         for (const [skillId, cd] of Object.entries(ep.skillCooldowns)) {
@@ -658,10 +798,9 @@ export class GameRoom extends Room<{ state: GameState }> {
           }
         }
 
-      // 主动技能剩余次数
+      // 主动技能剩余次数（一个角色可能有多个主动技，如混沌女王）
       const ch = e.characterMap.get(ep.characterId);
-      const active = ch?.skills.find((sk) => sk.trigger === 'active');
-      if (active) {
+      for (const active of ch?.skills.filter((sk) => sk.trigger === 'active') ?? []) {
         const used = ep.skillState[active.id]?.used ?? 0;
         const effect = active.effect as { uses?: number };
         const left = Math.max(0, (effect.uses ?? 1) - used);

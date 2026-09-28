@@ -10,3 +10,5 @@ Thumbs.db
 
 test-results/
 playwright-report/
+.zcode/
+$null

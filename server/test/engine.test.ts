@@ -45,8 +45,8 @@ describe('开局', () => {
       expect(p.hand).toHaveLength(7);
       expect(p.hand.filter((c) => c.cardId === 'defuse')).toHaveLength(1);
     }
-    // 3 人：爆炸猫 2 张 + 剩余拆解 3 张
-    expect(e.deck.filter((c) => c.cardId === 'exploding')).toHaveLength(2);
+    // 3 人：爆炸猫 5 张（人数+2）+ 剩余拆解 3 张
+    expect(e.deck.filter((c) => c.cardId === 'exploding')).toHaveLength(5);
     expect(e.deck.filter((c) => c.cardId === 'defuse')).toHaveLength(3);
     expect(events.some((x) => x.type === 'gameEnd')).toBe(false);
   });
@@ -70,7 +70,7 @@ describe('开局', () => {
     expect((peeks[0] as any).sessionId).toBe(first.sessionId);
   });
 
-  it('8 人开局：每人保底 1 张拆解、爆炸猫 7 张', () => {
+  it('8 人开局：每人保底 1 张拆解、爆炸猫 10 张、经典卡组按人数放大', () => {
     const e = setup(7, ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']);
     expect(e.players).toHaveLength(8);
     const ev = start(e);
@@ -82,7 +82,9 @@ describe('开局', () => {
       expect(p.hand.filter((c) => c.cardId === 'defuse')).toHaveLength(1);
     }
     expect(e.deck.filter((c) => c.cardId === 'defuse')).toHaveLength(0);
-    expect(e.deck.filter((c) => c.cardId === 'exploding')).toHaveLength(7);
+    // 爆炸猫 = 8+2；经典卡组 8 人翻倍 108 张，发 48 张后剩 60 + 10 爆炸 = 70
+    expect(e.deck.filter((c) => c.cardId === 'exploding')).toHaveLength(10);
+    expect(e.deck).toHaveLength(70);
   });
 });
 
@@ -245,7 +247,8 @@ describe('组合与爆炸', () => {
     expect(evPair.some((x) => x.type === 'invalid')).toBe(false);
     expect(e.discard.filter((c) => c.cardId === 'plain-melon')).toHaveLength(2);
 
-    // 三张（指定偷 shuffle）
+    // 三张（指定偷 shuffle；对子的随机偷可能已把 victim-shuffle 偷走，重新保证目标有 shuffle）
+    target.hand.push({ iid: 'victim-shuffle-2', cardId: 'shuffle' });
     cur.hand.push(
       { iid: 'q1', cardId: 'plain-potato' },
       { iid: 'q2', cardId: 'plain-potato' },
@@ -312,6 +315,8 @@ describe('攻击与连击', () => {
   it('攻击让下一位连续行动 2 回合', () => {
     const e = setup();
     start(e);
+    // 本测试只关心回合推进：移除爆炸猫，保证摸牌必定安全
+    e.deck = e.deck.filter((c) => c.cardId !== 'exploding');
     const cur = e.current()!;
     const next = e.players[(e.players.indexOf(cur) + e.direction + 3) % 3]!;
     e.players.forEach((p) => (p.hand = p.hand.filter((c) => c.cardId !== 'nope')));
@@ -327,18 +332,6 @@ describe('攻击与连击', () => {
     e.drawCard(next.sessionId);
     expect(e.current()?.sessionId).not.toBe(next.sessionId);
   });
-
-  it('精准攻击指定目标', () => {
-    const e = setup();
-    start(e);
-    const cur = e.current()!;
-    const target = e.players.find((p) => p.sessionId !== cur.sessionId)!;
-    e.players.forEach((p) => (p.hand = p.hand.filter((c) => c.cardId !== 'nope')));
-    cur.hand.push({ iid: 'test-tatk-1', cardId: 'targetedAttack' });
-    e.playCard(cur.sessionId, { instanceId: 'test-tatk-1', targetSessionId: target.sessionId });
-    expect(e.current()?.sessionId).toBe(target.sessionId);
-    expect(target.turnsLeft).toBe(2);
-  });
 });
 
 describe('主动技能', () => {
@@ -353,6 +346,8 @@ describe('主动技能', () => {
     }
     const a = e.players.find((p) => p.sessionId === 's:A')!;
     const b = e.players.find((p) => p.sessionId === 's:B')!;
+    // 保证 B 手里有预知未来（发牌随机，不保证）
+    b.hand.push({ iid: 'victim-peek', cardId: 'peek' });
     const aPeekBefore = a.hand.filter((c) => c.cardId === 'peek').length;
     const bPeekBefore = b.hand.filter((c) => c.cardId === 'peek').length;
     a.hand.push(

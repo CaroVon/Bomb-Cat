@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { BUILTIN_CHARACTERS, MAX_PLAYERS, type DeckDef } from '@bombcat/shared';
+import { BUILTIN_CHARACTERS, classicDeckFor, MAX_PLAYERS, type DeckDef } from '@bombcat/shared';
 import { eachPlayer, sendAct, useGame } from '../lib/game';
-import { CLASSIC_DECK, loadDecks } from '../lib/decks';
+import { loadDecks } from '../lib/decks';
 import { getActiveBuild, loadBuilds, setActiveBuildId } from '../lib/builds';
 import { CharacterSelect } from '../components/CharacterSelect';
+import { portraitUrl } from '../lib/portraits';
 
 export default function RoomPage() {
   const game = useGame();
@@ -14,6 +15,8 @@ export default function RoomPage() {
   const [deckId, setDeckId] = useState('classic');
   const builds = useMemo(loadBuilds, []);
   const [buildId, setBuildId] = useState(getActiveBuild()?.id ?? '');
+  /** 开局补机器人至 N 人（0 = 不补；普通联机房，随 startGame 发给服务器） */
+  const [fillTo, setFillTo] = useState(4);
 
   const myId = game.room?.sessionId ?? '';
 
@@ -62,6 +65,11 @@ export default function RoomPage() {
   const players: any[] = [];
   eachPlayer(state, (p: any) => players.push(p));
 
+  // 开局时的最终人数（含机器人补位）与经典卡组缩放后的牌堆构成
+  const finalCount = Math.min(Math.max(players.length, fillTo), MAX_PLAYERS);
+  const actionCards = Object.values(classicDeckFor(finalCount).counts).reduce((a, b) => a + b, 0);
+  const botsToFill = Math.max(0, Math.min(fillTo, MAX_PLAYERS) - players.length);
+
   return (
     <div className="page">
       <div className="h-row" style={{ marginBottom: 16 }}>
@@ -94,7 +102,7 @@ export default function RoomPage() {
                   <span
                     className="player-mini-avatar"
                     style={{
-                      ['--av' as string]: `url(/assets/characters/${p.characterId || 'none'}.jpg)`,
+                      ['--av' as string]: `url(${portraitUrl(p.characterId)})`,
                     }}
                   />
                   <span style={{ fontSize: 22, display: 'none' }}>{ch?.emoji ?? '🙂'}</span>
@@ -127,6 +135,29 @@ export default function RoomPage() {
                   去定制工坊编辑 →
                 </Link>
               </div>
+              {deckId === 'classic' && (
+                <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
+                  📦 {finalCount} 人局：动作牌 {actionCards} 张 + 爆炸猫 {finalCount + 2} 张（随机分布牌堆）
+                </p>
+              )}
+              <div className="h-row" style={{ marginTop: 12 }}>
+                <span className="muted" style={{ fontSize: 13 }}>
+                  🤖 开局补机器人至
+                </span>
+                <select value={fillTo} onChange={(e) => setFillTo(Number(e.target.value))}>
+                  <option value={0}>不补</option>
+                  {[2, 3, 4, 5, 6, 7, 8].map((n) => (
+                    <option key={n} value={n}>
+                      {n} 人
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {fillTo >= 2 && players.length < fillTo && (
+                <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
+                  当前 {players.length} 名玩家，开局时将补 {botsToFill} 个机器人
+                </p>
+              )}
             </div>
           )}
 
@@ -157,10 +188,10 @@ export default function RoomPage() {
             <button
               className="primary"
               style={{ width: '100%', marginTop: 16, padding: '14px', fontSize: 17 }}
-              disabled={players.length < 2}
-              onClick={() => sendAct({ action: 'startGame' })}
+              disabled={players.length < 2 && fillTo < 2}
+              onClick={() => sendAct({ action: 'startGame', fillTo })}
             >
-              {players.length < 2 ? '至少 2 人才能开始' : '开始游戏！'}
+              {players.length < 2 && fillTo < 2 ? '至少 2 人（或补机器人）才能开始' : '开始游戏！'}
             </button>
           ) : (
             <p className="muted" style={{ textAlign: 'center', marginTop: 16 }}>

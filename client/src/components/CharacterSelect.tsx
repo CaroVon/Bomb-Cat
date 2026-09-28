@@ -9,6 +9,7 @@ import {
   type CharacterDef,
 } from '@bombcat/shared';
 import { sfx } from '../lib/sound';
+import { portraitUrl } from '../lib/portraits';
 
 interface Props {
   selectedId: string | null;
@@ -93,7 +94,7 @@ export function CharacterSelect({ selectedId, onSelect }: Props) {
               <div
                 className="char-portrait"
                 style={{
-                  backgroundImage: `url(/assets/characters/${displayId}.jpg)`,
+                  backgroundImage: `url(${portraitUrl(displayId)})`,
                 }}
               />
               <div className="char-card-info">
@@ -128,14 +129,18 @@ export function CharacterSelect({ selectedId, onSelect }: Props) {
                 <Difficulty level={rpg.difficulty} />
               </div>
 
-              {/* 技能展示 */}
+              {/* 技能展示（多技能角色全部列出，如数学老师四则运算） */}
               {char.skills.length > 0 ? (
-                <div className="skill-panel">
-                  <div className="h-row" style={{ gap: 8, marginBottom: 6 }}>
-                    <SkillBadge skill={char.skills[0]!} />
-                    <strong style={{ fontSize: 15 }}>{char.skills[0]!.name}</strong>
-                  </div>
-                  <p className="skill-desc">{char.skills[0]!.description}</p>
+                <div className="skill-panel" style={{ maxHeight: 260, overflowY: 'auto' }}>
+                  {char.skills.map((sk) => (
+                    <div key={sk.id} style={{ marginBottom: 10 }}>
+                      <div className="h-row" style={{ gap: 8, marginBottom: 6 }}>
+                        <SkillBadge skill={sk} />
+                        <strong style={{ fontSize: 15 }}>{sk.name}</strong>
+                      </div>
+                      <p className="skill-desc">{sk.description}</p>
+                    </div>
+                  ))}
                 </div>
               ) : (
                 <div className="skill-panel">
@@ -181,7 +186,7 @@ export function CharacterSelect({ selectedId, onSelect }: Props) {
             >
               <div
                 className="char-mini-portrait"
-                style={{ backgroundImage: `url(/assets/characters/${c.id}.jpg)` }}
+                style={{ backgroundImage: `url(${portraitUrl(c.id)})` }}
               />
               <span className="char-mini-name">{c.name}</span>
               {isSel && <span className="char-mini-check">✓</span>}

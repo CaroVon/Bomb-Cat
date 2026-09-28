@@ -2,6 +2,7 @@ import {
   BUILTIN_CARD_MAP,
   BUILTIN_CHARACTERS,
   CLASSIC_DECK,
+  classicDeckFor,
   MAX_PLAYERS,
   OBJECTIVE_MAP,
   OBJECTIVES,
@@ -23,6 +24,7 @@ import type {
   EnginePlayer,
   PendingAlter,
   PendingDefuse,
+  PendingHelp,
   PendingPlay,
   PlayCardInput,
   SubPhase,
@@ -39,6 +41,9 @@ import {
 
 let instanceSeq = 0;
 const newIid = (cardId: string): string => `${cardId}#${++instanceSeq}`;
+
+/** 上一局出现的 World Rule（进程内记忆，用于"连续两局不重复"防重复） */
+let lastWorldRuleId = '';
 
 export type Rng = () => number;
 
@@ -78,10 +83,12 @@ export class GameEngine {
   private queue: { play: PendingPlay; effects: CardEffect[]; index: number } | null = null;
   /** 队列跑完后是否结束回合（skip/attack/drawFromBottom 类效果） */
   private endTurnAfterEffects = false;
-  /** 结束回合时的摸牌来源（摸牌底语义） */
-  private pendingEndDraw: 'bottom' | null = null;
-  /** 本轮出牌携带的攻击（targeted=指定目标，null=沿方向下一位） */
-  private pendingAttack: { targeted: string | null } | null = null;
+  /** 结束回合时从牌堆底摸的牌数（0=不摸；乘法可加倍为 2） */
+  private pendingEndDrawCount = 0;
+  /** 本轮出牌携带的攻击（结束回合后沿方向下一位连走 N 回合） */
+  private pendingAttack: boolean = false;
+  /** 攻击回合倍率（乘法双倍时为 2） */
+  private pendingAttackMult = 1;
 
   winnerSessionId = '';
   deathOrder: string[] = [];
@@ -101,6 +108,8 @@ export class GameEngine {
     cardIds: string[];
     at: number;
     noped: boolean;
+    /** 目标型效果的目标（舞台展示"→ 谁"与座位脉冲） */
+    targetSessionId?: string;
   } | null = null;
 
   /** 最近一次阵亡（可视化用：爆炸演出） */
@@ -111,12 +120,33 @@ export class GameEngine {
   chaosDrawsActive = false;
   /** chaos_queen 混沌之触：激活者 sessionId（下轮其回合开始时关闭） */
   chaosDrawsBy = '';
-  /** Banana 大香蕉之怒：剩余覆盖回合数（全局） */
+  /** Banana 大香蕉之怒：剩余覆盖轮数（1 轮 = 所有存活玩家各经历一次回合开始） */
   bananaOverlayTurns = 0;
-  /** 眼泪牌等待队列（多张依次处理） */
-  pendingTearQueue: string[] = [];
+  /** Banana 大香蕉之怒：本轮已开始过回合的玩家（连击回合不重复计入） */
+  private bananaOverlaySeen = new Set<string>();
   /** 当前正在处理的眼泪牌信息 */
   pendingTear: { sessionId: string; tearIid: string } | null = null;
+  /** future_queen 命运改写：待选择的顶 N 张（该玩家提交 futureRewritePick 或回合结束作废） */
+  private pendingFutureRewrite: { sessionId: string; cards: CardInstance[] } | null = null;
+  /** bigEye 揭发：待点选的弃牌/抽牌（该玩家提交 exposePick 或回合结束作废） */
+  private pendingExpose: { sessionId: string; targetSessionId: string; mode: 'discard' | 'steal' } | null = null;
+  /** 秀英求助：等待被求助者回应（提交 helpRespond 或超时自动拒绝） */
+  private pendingHelp: PendingHelp | null = null;
+
+  /** 命运改写是否挂起中（房间层据此暂停回合计时，给玩家思考时间） */
+  get futureRewritePending(): boolean {
+    return this.pendingFutureRewrite !== null;
+  }
+
+  /** 秀英求助是否挂起中（房间层据此暂停回合计时） */
+  get helpPending(): boolean {
+    return this.pendingHelp !== null;
+  }
+
+  /** 当前求助信息（房间层用于超时兜底） */
+  get pendingHelpInfo(): PendingHelp | null {
+    return this.pendingHelp;
+  }
 
   constructor(private rng: Rng = Math.random) {}
 
@@ -149,12 +179,28 @@ export class GameEngine {
     return arr;
   }
 
+  /** 从手牌中随机抽 n 张（不重复） */
+  private pickRandomFrom(hand: CardInstance[], n: number): CardInstance[] {
+    const pool = [...hand];
+    const picked: CardInstance[] = [];
+    for (let i = 0; i < n && pool.length > 0; i++) {
+      const idx = Math.floor(this.rng() * pool.length);
+      picked.push(pool.splice(idx, 1)[0]!);
+    }
+    return picked;
+  }
+
   current(): EnginePlayer | undefined {
     return this.players.find((p) => p.sessionId === this.turnOrder[this.turnIndex]);
   }
 
   defOf(instance: CardInstance): CardDef {
     return this.cardMap.get(instance.cardId)!;
+  }
+
+  /** 是否爆炸类卡牌（爆炸猫 / 爆炸苹果）——统一按 kind 判断，避免漏掉新卡 */
+  private isExploding(c: CardInstance): boolean {
+    return this.cardMap.get(c.cardId)?.kind === 'exploding';
   }
 
   handOf(sessionId: string): CardInstance[] {
@@ -164,6 +210,12 @@ export class GameEngine {
   private skillOf(player: EnginePlayer, trigger: SkillDef['trigger']): SkillDef | undefined {
     const ch = this.characterMap.get(player.characterId);
     return ch?.skills.find((s) => s.trigger === trigger);
+  }
+
+  /** 按 id 查找主动技能（一个角色可能有多个主动技，如混沌女王） */
+  private activeSkillOf(player: EnginePlayer, skillId: string): SkillDef | undefined {
+    const ch = this.characterMap.get(player.characterId);
+    return ch?.skills.find((s) => s.trigger === 'active' && s.id === skillId);
   }
 
   private skillState(player: EnginePlayer, skillId: string) {
@@ -214,6 +266,17 @@ export class GameEngine {
       mustPlayIid: null,
       isAngry: false,
       rippleUsedThisTurn: false,
+      archives: 0,
+      mathSubDraw: 0,
+      mathMulNext: 0,
+      mathDivNext: 0,
+      freezeLayers: 0,
+      helpedThisTurn: false,
+      lychees: 0,
+      askedHelp: [],
+      lycheeGivenThisTurn: 0,
+      appleTurns: 0,
+      appleFrom: '',
     };
     this.players.push(player);
     if (!this.hostSessionId) this.hostSessionId = sessionId;
@@ -264,13 +327,16 @@ export class GameEngine {
     if (hostSessionId !== this.hostSessionId) {
       return this.invalid(hostSessionId, '只有房主能开始游戏');
     }
-    const deck = deckDef ?? CLASSIC_DECK;
     const n = this.players.length;
+    // 经典卡组按人数缩放（服务器可信来源，跳过张数上限校验；自定义卡组照常校验）
+    const deck = deckDef ?? classicDeckFor(n);
     if (n < 2) return this.invalid(hostSessionId, '至少需要 2 名玩家');
 
-    const result = validateDeck(deck, n);
-    if (!result.ok) {
-      return this.invalid(hostSessionId, `卡组不合法：${result.errors.join('；')}`);
+    if (deckDef) {
+      const result = validateDeck(deckDef, n);
+      if (!result.ok) {
+        return this.invalid(hostSessionId, `卡组不合法：${result.errors.join('；')}`);
+      }
     }
     this.deckDef = deck;
     this.cardMap = new Map(BUILTIN_CARD_MAP);
@@ -282,7 +348,12 @@ export class GameEngine {
     } else if (options?.worldRuleId && WORLD_RULE_MAP.has(options.worldRuleId)) {
       this.worldRuleId = options.worldRuleId;
     } else {
-      this.worldRuleId = WORLD_RULES[Math.floor(this.rng() * WORLD_RULES.length)]!.id;
+      // 防重复：连续两局不出现同一条规则（进程内记忆上一局），其余保持等概率
+      const pool = WORLD_RULES.filter((r) => r.id !== lastWorldRuleId);
+      const candidates = pool.length > 0 ? pool : WORLD_RULES;
+      const picked = candidates[Math.floor(this.rng() * candidates.length)]!;
+      this.worldRuleId = picked.id;
+      lastWorldRuleId = picked.id;
     }
 
     const pool: CardInstance[] = [];
@@ -293,7 +364,8 @@ export class GameEngine {
 
     // 动作牌至少要够：每人 3 张 + 爆炸猫 + 剩余拆解
     const defuseLeft = Math.max(0, defuseTotal(n) - n);
-    const exploding = n - 1 + (options?.extraExploding ?? 0);
+    // 规则：爆炸猫 = 人数 + 2，随机分布（发完起手后混入整体洗牌）
+    const exploding = n + 2 + (options?.extraExploding ?? 0);
     if (pool.length < exploding + defuseLeft + n * 3) {
       return this.invalid(hostSessionId, '卡组牌太少，无法支撑这么多玩家');
     }
@@ -344,6 +416,18 @@ export class GameEngine {
       p.mustPlayIid = null;
       p.isAngry = false;
       p.rippleUsedThisTurn = false;
+      p.archives = 0;
+      // v3：重置新状态
+      p.mathSubDraw = 0;
+      p.mathMulNext = 0;
+      p.mathDivNext = 0;
+      p.freezeLayers = 0;
+      p.helpedThisTurn = false;
+      p.lychees = 0;
+      p.askedHelp = [];
+      p.lycheeGivenThisTurn = 0;
+      p.appleTurns = 0;
+      p.appleFrom = '';
 
       // Nana：开局没有拆解
       if (p.characterId === 'nana') {
@@ -358,13 +442,21 @@ export class GameEngine {
           }
         }
       }
+      // 秀英：开局 N 层冰冻（无法出牌/摸牌，且不受技能影响）
+      const ice = this.skillOf(p, 'gameStart');
+      if (ice?.effect.kind === 'iceFrozen') {
+        p.freezeLayers = ice.effect.layers;
+      }
     });
     // 重置全局修饰器
     this.chaosDrawsActive = false;
     this.chaosDrawsBy = '';
     this.bananaOverlayTurns = 0;
-    this.pendingTearQueue = [];
+    this.bananaOverlaySeen = new Set();
     this.pendingTear = null;
+    this.pendingFutureRewrite = null;
+    this.pendingExpose = null;
+    this.pendingHelp = null;
 
     // World Rule 防爆过剩：额外 2 张拆解
     if (this.worldRuleId === 'defuse-plenty') {
@@ -457,6 +549,14 @@ export class GameEngine {
           this.log(events, `${p.name} 的「${skill.name}」生效`);
         }
       }
+      // 邪恶苹果头被动：往牌堆随机位置藏爆炸苹果（公开公告：牌堆总数本就公开）
+      if (skill.effect.kind === 'appleBomb') {
+        for (let i = 0; i < skill.effect.count; i++) {
+          const pos = Math.floor(this.rng() * (this.deck.length + 1));
+          this.deck.splice(pos, 0, { iid: newIid('exploding-apple'), cardId: 'exploding-apple' });
+        }
+        this.log(events, `🍏 ${p.name} 往牌堆里藏了一张爆炸苹果……`);
+      }
     }
 
     this.runTurnStartSkills(first, events);
@@ -478,14 +578,61 @@ export class GameEngine {
     if (this.subPhase !== 'awaiting-action') return this.invalid(sessionId, '当前不能出牌');
     if (!player.alive) return this.invalid(sessionId, '你已出局');
     if (this.current()?.sessionId !== sessionId) return this.invalid(sessionId, '还没轮到你');
+    // 秀英冰冻：无法出牌
+    if (this.isFrozen(player)) {
+      return this.invalid(sessionId, `冰冻中无法出牌（剩 ${player.freezeLayers} 层）`);
+    }
 
     const instance = player.hand.find((c) => c.iid === input.instanceId);
     if (!instance) return this.invalid(sessionId, '手中没有这张牌');
+
+    // Pig King：消化完成的牌必须先处理（打出它或经 digestPlay 丢弃）
+    if (player.mustPlayIid) {
+      const playedIds = [input.instanceId, ...(input.comboInstanceIds ?? [])];
+      if (!playedIds.includes(player.mustPlayIid)) {
+        return this.invalid(sessionId, '必须先处理消化获得的牌 🐷');
+      }
+    }
     const def = this.defOf(instance);
+    const overlayActive = this.bananaOverlayTurns > 0;
+
+    // 香蕉覆盖期间：女王只能靠香蕉兑换出牌（点手牌只会选中）
+    if (overlayActive && player.characterId === 'banana') {
+      return this.invalid(sessionId, '覆盖期间只能通过香蕉兑换出牌 🍌');
+    }
+    // 香蕉覆盖期间：所有人只能盲打单牌
+    // - 同名猫组合禁用
+    // - 普通猫/拆解/否认：盲打无任何效果，直接进弃牌堆
+    // - 动作牌：正常效果，需要目标时由服务端随机指定（盲打不泄露牌型）
+    if (overlayActive) {
+      if (def.kind === 'exploding') return this.invalid(sessionId, '爆炸猫不能主动打出');
+      if (def.kind === 'tear') return this.invalid(sessionId, '眼泪不能主动打出');
+      if ((input.comboInstanceIds ?? []).length > 0) {
+        return this.invalid(sessionId, '覆盖期间无法使用同名猫组合 🍌');
+      }
+      if (def.kind === 'plain' || def.kind === 'defuse' || instance.cardId === 'nope') {
+        player.hand = player.hand.filter((c) => c.iid !== instance.iid);
+        if (player.mustPlayIid === instance.iid) player.mustPlayIid = null;
+        this.discard.push(instance);
+        const events: EngineEvent[] = [{ type: 'hand', sessionId }];
+        this.log(events, `${player.name} 盲打了一张香蕉（【${def.name}】），没有产生效果`);
+        this.lastPlay = {
+          playId: `blind-${++instanceSeq}`,
+          bySessionId: sessionId,
+          byName: player.name,
+          cardIds: [instance.cardId],
+          at: Date.now(),
+          noped: false,
+        };
+        this.addArchive(sessionId);
+        return events;
+      }
+    }
 
     if (def.kind === 'defuse') return this.invalid(sessionId, '拆解会在摸到爆炸猫时自动使用');
     if (instance.cardId === 'nope') return this.invalid(sessionId, '否认牌只能在别人出牌的 8 秒窗口内打出');
     if (def.kind === 'exploding') return this.invalid(sessionId, '爆炸猫不能主动打出');
+    if (def.kind === 'tear') return this.invalid(sessionId, '眼泪不能主动打出');
 
     let combo: PendingPlay['combo'] = 'single';
     let instances: CardInstance[] = [instance];
@@ -538,29 +685,95 @@ export class GameEngine {
       effects = def.effects;
     }
 
+    // bigEye 被动限制：无法使用求赠和偷牌效果（含组合偷牌）
+    if (player.characterId === 'bigEye') {
+      const stealEffect = effects.some((e) => e.type === 'stealRandom' || e.type === 'stealNamed');
+      if (instance.cardId === 'favor' || stealEffect) {
+        return this.invalid(sessionId, '大眼Nana无法使用求赠和偷牌效果 👀');
+      }
+    }
+
     const needsTarget = effects.some(
       (e) =>
         e.type === 'stealRandom' ||
         e.type === 'stealNamed' ||
         e.type === 'peekHand' ||
-        e.type === 'swapHand' ||
-        e.type === 'targetedAttack',
+        e.type === 'swapHand',
     );
-    if (needsTarget) {
+    let effectiveTargetId = input.targetSessionId;
+    if (needsTarget && overlayActive) {
+      // 盲打：服务端随机指定目标（含求赠索要的牌），避免"弹目标选择框"泄露牌型
+      const alive = this.players.filter((p) => p.alive && p.sessionId !== sessionId);
+      if (alive.length === 0) return this.invalid(sessionId, '没有其他存活玩家可以作为目标');
+      const t = alive[Math.floor(this.rng() * alive.length)]!;
+      effectiveTargetId = t.sessionId;
+      if (!wantCardId && t.hand.length > 0) {
+        wantCardId = t.hand[Math.floor(this.rng() * t.hand.length)]!.cardId;
+      }
+    } else if (needsTarget) {
       const t = this.players.find((p) => p.sessionId === input.targetSessionId);
       if (!t || !t.alive || t.sessionId === sessionId) {
         return this.invalid(sessionId, '需要选择一名其他存活玩家作为目标');
       }
     }
 
+    // 数学老师：除法/乘法修饰（作用于功能牌；同存时除法优先，两个标记都消耗）
+    if (player.mathDivNext > 0) {
+      player.mathDivNext = 0;
+      player.mathMulNext = 0;
+      player.hand = player.hand.filter((c) => !instances.some((i) => i.iid === c.iid));
+      if (player.mustPlayIid && instances.some((i) => i.iid === player.mustPlayIid)) {
+        player.mustPlayIid = null;
+      }
+      this.discard.push(...instances);
+      const events: EngineEvent[] = [{ type: 'hand', sessionId }];
+      const names = instances.map((i) => this.defOf(i).name).join('+');
+      this.log(events, `➗ ${player.name} 打出【${names}】，被除法干扰没有产生效果`);
+      this.lastPlay = {
+        playId: `div-${++instanceSeq}`,
+        bySessionId: sessionId,
+        byName: player.name,
+        cardIds: instances.map((i) => i.cardId),
+        at: Date.now(),
+        noped: false,
+      };
+      this.addArchive(sessionId);
+      return events;
+    }
+    // 数学老师：乘法修饰（按效果类型给出真正的双倍语义；无法加倍则不消耗标记）
+    let mulApplied = false;
+    if (player.mathMulNext > 0) {
+      const doubled = this.doubleEffects(player, effects);
+      if (doubled) {
+        effects = doubled;
+        player.mathMulNext = 0;
+        mulApplied = true;
+      }
+    }
+
     player.hand = player.hand.filter((c) => !instances.some((i) => i.iid === c.iid));
+    if (player.mustPlayIid && instances.some((i) => i.iid === player.mustPlayIid)) {
+      player.mustPlayIid = null;
+    }
 
     const events: EngineEvent[] = [];
     this.ev(events, { type: 'hand', sessionId });
 
     const cardNames = instances.map((i) => this.defOf(i).name).join('+');
-    const targetName = this.players.find((p) => p.sessionId === input.targetSessionId)?.name;
+    const targetName = this.players.find((p) => p.sessionId === effectiveTargetId)?.name;
     this.log(events, `${player.name} 打出【${cardNames}】${targetName ? `→ ${targetName}` : ''}`);
+    if (mulApplied) {
+      this.log(events, `✖️ 乘法生效：【${cardNames}】的效果触发了两次`);
+    }
+    // 秀英冰冻：被功能牌指定 → 冰冻 -1（卡牌效果照常生效）
+    if (needsTarget) {
+      this.cardHitsFrozen(
+        this.players.find((p) => p.sessionId === effectiveTargetId),
+        cardNames,
+        events,
+      );
+    }
+    this.addArchive(sessionId);
 
     this.pendingPlay = {
       playId: `play-${++instanceSeq}`,
@@ -568,7 +781,7 @@ export class GameEngine {
       instances,
       combo,
       effects,
-      targetSessionId: needsTarget ? input.targetSessionId : undefined,
+      targetSessionId: needsTarget ? effectiveTargetId : undefined,
       wantCardId,
       nopedBy: [],
     };
@@ -580,6 +793,7 @@ export class GameEngine {
       cardIds: instances.map((i) => i.cardId),
       at: Date.now(),
       noped: false,
+      targetSessionId: needsTarget ? effectiveTargetId : undefined,
     };
     this.subPhase = 'awaiting-nope';
     this.ev(events, { type: 'nopeWindowOpened' });
@@ -613,6 +827,7 @@ export class GameEngine {
 
     const events: EngineEvent[] = [{ type: 'hand', sessionId }];
     this.log(events, `${player.name} ${noped ? '否认' : '反否认'}了 ${owner?.name} 的牌 ❌`);
+    this.addArchive(sessionId);
     return events;
   }
 
@@ -629,6 +844,10 @@ export class GameEngine {
     const player = this.players.find((p) => p.sessionId === pending.sessionId)!;
     if (this.lastPlay?.playId === pending.playId) {
       this.lastPlay = { ...this.lastPlay, noped };
+    }
+    if (noped) {
+      // 牌被否认：乘法设定的攻击倍率不应生效
+      this.pendingAttackMult = 1;
     }
 
     if (noped) {
@@ -652,22 +871,14 @@ export class GameEngine {
     this.discard.push(...pending.instances);
     this.queue = { play: pending, effects: pending.effects, index: 0 };
     this.endTurnAfterEffects = pending.effects.some(
-      (e) =>
-        e.type === 'skip' ||
-        e.type === 'attack' ||
-        e.type === 'targetedAttack' ||
-        e.type === 'drawFromBottom',
+      (e) => e.type === 'skip' || e.type === 'attack' || e.type === 'drawFromBottom',
     );
-    this.pendingEndDraw = pending.effects.some((e) => e.type === 'drawFromBottom')
-      ? 'bottom'
-      : null;
-    if (pending.effects.some((e) => e.type === 'targetedAttack')) {
-      this.pendingAttack = { targeted: pending.targetSessionId ?? null };
-    } else if (pending.effects.some((e) => e.type === 'attack')) {
-      this.pendingAttack = { targeted: null };
-    } else {
-      this.pendingAttack = null;
-    }
+    const bottomDraws = pending.effects
+      .filter((e) => e.type === 'drawFromBottom')
+      .reduce((sum, e) => sum + (e.count ?? 1), 0);
+    this.pendingEndDrawCount = bottomDraws;
+    this.pendingAttack = pending.effects.some((e) => e.type === 'attack');
+    // 注意：pendingAttackMult 由「乘法」在 playCard 阶段设定，这里不能重置（否则双倍失效）
     return this.runQueue(events);
   }
 
@@ -717,12 +928,11 @@ export class GameEngine {
     switch (effect.type) {
       case 'skip':
       case 'attack':
-      case 'targetedAttack':
         // World Rule 疯狂抽卡：打出跳过后额外摸一张（换一张）
         if (effect.type === 'skip' && this.worldRuleId === 'mad-draw') {
           const c = this.deck.pop();
           if (c) {
-            if (c.cardId === 'exploding') {
+            if (this.isExploding(c)) {
               const r = this.handleExplosion(player, c, events);
               if (r === 'suspend-defuse' || !player.alive) return 'ok';
             } else {
@@ -740,10 +950,10 @@ export class GameEngine {
       }
 
       case 'peek': {
-        // future_queen 天眼强化：peek 看 5 张而非 3 张
+        // future_queen 天眼强化：peek 至少看 5 张（乘法加倍时按加倍后的张数）
         const isFQ = player.characterId === 'future_queen';
-        const defaultCount = isFQ ? 5 : (effect.count ?? 3);
-        const n = Math.min(defaultCount, this.deck.length);
+        const wanted = isFQ ? Math.max(5, effect.count ?? 0) : (effect.count ?? 3);
+        const n = Math.min(wanted, this.deck.length);
         const top = this.deck.slice(this.deck.length - n).reverse();
         if (isFQ && n > 0) {
           // future_queen 天眼强化：peek 升级为「查看5张+自由排列放回」
@@ -770,7 +980,7 @@ export class GameEngine {
       }
 
       case 'alterFuture': {
-        const n = Math.min(3, this.deck.length);
+        const n = Math.min(effect.count ?? 3, this.deck.length);
         if (n === 0) return 'ok';
         const top = this.deck.slice(this.deck.length - n).reverse();
         this.pendingAlter = { sessionId: player.sessionId, cards: top };
@@ -799,10 +1009,8 @@ export class GameEngine {
         } else {
           idx = target.hand.findIndex((c) => c.cardId === effect.cardId);
           if (idx < 0) {
-            this.log(
-              events,
-              `${target.name} 没有【${this.cardMap.get(effect.cardId ?? '')?.name ?? effect.cardId}】，偷取落空`,
-            );
+            // 公开日志不泄露目标持牌信息
+            this.log(events, `${target.name} 没有对方想要的牌，偷取落空`);
             return 'ok';
           }
         }
@@ -812,6 +1020,7 @@ export class GameEngine {
         this.ev(events, { type: 'hand', sessionId: player.sessionId });
         this.log(events, `${player.name} 从 ${target.name} 那里偷走了 1 张牌 🤏`);
         objSteal(player, events);
+        this.chaosRipple(events);
         return 'ok';
       }
 
@@ -858,7 +1067,7 @@ export class GameEngine {
         for (let i = 0; i < count; i++) {
           const c = this.deck.pop();
           if (!c) break;
-          if (c.cardId === 'exploding') {
+          if (this.isExploding(c)) {
             return this.handleExplosion(player, c, events);
           }
           player.hand.push(c);
@@ -871,6 +1080,166 @@ export class GameEngine {
       default:
         return 'ok';
     }
+  }
+
+  /** 秀英冰冻：冰冻中的玩家不受技能影响（技能无效，但冰冻 -1）。返回 true = 已挡下 */
+  private frozenBlocksSkill(target: EnginePlayer, events: EngineEvent[], skillName: string): boolean {
+    if (target.freezeLayers <= 0) return false;
+    target.freezeLayers--;
+    this.log(
+      events,
+      `🧊 ${target.name} 处于冰冻中，「${skillName}」没有产生效果（冰冻 -1，剩 ${target.freezeLayers} 层）`,
+    );
+    if (target.freezeLayers === 0) {
+      this.log(events, `🧊 ${target.name} 解冻了！可以正常出牌和摸牌了`);
+    }
+    return true;
+  }
+
+  /** 秀英是否处于冰冻（无法出牌/摸牌；本回合被帮助过则视为可行动） */
+  private isFrozen(p: EnginePlayer): boolean {
+    return p.freezeLayers > 0 && !p.helpedThisTurn;
+  }
+
+  /**
+   * 邪恶苹果头本人摸到爆炸苹果：悄悄放回牌堆（插在非顶位置，避免立刻又抽到）并额外摸 1 张。
+   * 返回 true 表示已消化掉这张牌（调用方不要再按爆炸处理）。
+   */
+  private tryAppleConvert(player: EnginePlayer, c: CardInstance, events: EngineEvent[]): boolean {
+    if (c.cardId !== 'exploding-apple' || player.characterId !== 'apple') return false;
+    const pos = 1 + Math.floor(this.rng() * this.deck.length); // 1..len：不放回牌堆顶
+    this.deck.splice(this.deck.length - Math.min(pos, this.deck.length), 0, c);
+    this.ev(events, {
+      type: 'private',
+      sessionId: player.sessionId,
+      message: { action: 'notice', text: '🍏 你摸到了爆炸苹果，悄悄把它塞回了牌堆，并再摸一张' },
+    });
+    this.grantDraw(player, 1, events);
+    return true;
+  }
+
+  /** 秀英冰冻中被打上功能牌：冰冻 -1（卡牌效果照常生效） */
+  private cardHitsFrozen(target: EnginePlayer | undefined, cardName: string, events: EngineEvent[]): void {
+    if (!target || target.freezeLayers <= 0) return;
+    target.freezeLayers--;
+    this.log(
+      events,
+      `🧊 ${target.name} 被【${cardName}】命中，冰冻 -1（剩 ${target.freezeLayers} 层）`,
+    );
+    if (target.freezeLayers === 0) {
+      this.log(events, `🧊 ${target.name} 解冻了！可以正常出牌和摸牌了`);
+    }
+  }
+
+  /**
+   * 数学老师「乘法」：按效果类型给出真正的双倍语义。
+   * 返回 null 表示这张牌没有"触发两次"的空间（跳过/反转），不消耗标记。
+   */
+  private doubleEffects(player: EnginePlayer, effects: CardEffect[]): CardEffect[] | null {
+    const out: CardEffect[] = [];
+    for (const e of effects) {
+      switch (e.type) {
+        case 'attack':
+          this.pendingAttackMult = 2; // 连击回合数 ×2（finishTurn 结算）
+          out.push(e);
+          break;
+        case 'drawFromBottom':
+          out.push({ ...e, count: (e.count ?? 1) * 2 });
+          break;
+        case 'selfDraw':
+          out.push({ ...e, count: (e.count ?? 1) * 2 });
+          break;
+        case 'peek': {
+          const base = player.characterId === 'future_queen' ? 5 : (e.count ?? 3);
+          out.push({ ...e, count: base * 2 });
+          break;
+        }
+        case 'alterFuture':
+          out.push({ ...e, count: (e.count ?? 3) * 2 });
+          break;
+        case 'stealRandom':
+        case 'stealNamed':
+          out.push(e, e); // 偷两次
+          break;
+        case 'shuffle':
+          out.push(e, e); // 洗两次
+          break;
+        default:
+          // skip / reverse / peekHand / swapHand 等：没有"两次"的含义
+          return null;
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 额外的摸牌（不结束回合）：用于数学老师「加法」等授予式摸牌。
+   * 走正常管线（混沌之触偷牌 / 爆炸猫挂起拆解 / 眼泪），受减法标记影响。
+   */
+  private grantDraw(player: EnginePlayer, count: number, events: EngineEvent[]): void {
+    if (!player.alive || this.phase !== 'playing') return;
+    let n = count;
+    if (player.mathSubDraw > 0) {
+      n = Math.max(0, n - player.mathSubDraw);
+      player.mathSubDraw = 0;
+    }
+    // 猪王暴食：每次摸牌多摸一张
+    if (player.characterId === 'pig_king' && player.fullTurns <= 0) n += 1;
+    if (n <= 0) {
+      this.log(events, `🧊 ${player.name} 因减法标记，这次一张牌都没摸到`);
+      return;
+    }
+    for (let i = 0; i < n; i++) {
+      if (this.chaosDrawsActive) {
+        this.chaosSteal(player, events);
+        continue;
+      }
+      const c = this.deck.pop();
+      if (!c) break;
+      if (c.cardId === 'tear') {
+        this.handleTearDrawn(player, c, events);
+        return;
+      }
+      if (this.isExploding(c)) {
+        if (this.tryAppleConvert(player, c, events)) continue;
+        this.handleExplosion(player, c, events);
+        return;
+      }
+      player.hand.push(c);
+      this.ev(events, { type: 'hand', sessionId: player.sessionId });
+    }
+  }
+
+  /** bigEye 档案：其他玩家使用功能牌时积累档案（记在出牌者身上，上限 maxArchives） */
+  private addArchive(playSessionId: string): void {    if (this.phase !== 'playing') return;
+    const watcher = this.players.find((p) => p.characterId === 'bigEye' && p.alive);
+    if (!watcher || watcher.sessionId === playSessionId) return;
+    const p = this.players.find((x) => x.sessionId === playSessionId);
+    if (!p) return;
+    const skill = this.activeSkillOf(watcher, 'bigeye-expose');
+    const max = skill?.effect.kind === 'bigEyeExpose' ? skill.effect.maxArchives : 4;
+    if (p.archives < max) p.archives++;
+  }
+
+  /** chaos_queen 涟漪：有玩家因他人手牌数量变化 → 女王摸 1 张（每回合 1 次） */
+  private chaosRipple(events: EngineEvent[]): void {
+    if (this.phase !== 'playing') return;
+    const cq = this.players.find(
+      (p) => p.characterId === 'chaos_queen' && p.alive && !p.rippleUsedThisTurn,
+    );
+    if (!cq) return;
+    const c = this.deck.pop();
+    if (!c) return;
+    if (c.cardId === 'tear' || this.isExploding(c)) {
+      // 危险牌静默塞回随机位置、不消耗涟漪：避免在其他玩家结算中途挂起眼泪/拆解流程
+      const pos = Math.floor(this.rng() * this.deck.length);
+      this.deck.splice(this.deck.length - pos, 0, c);
+      return;
+    }
+    cq.rippleUsedThisTurn = true;
+    cq.hand.push(c);
+    this.ev(events, { type: 'hand', sessionId: cq.sessionId });
+    this.log(events, `🌀 涟漪：${cq.name} 感知到手牌变化，摸了 1 张牌`);
   }
 
   /** 铁壁骑士：被偷免疫 */
@@ -897,14 +1266,36 @@ export class GameEngine {
 
     const events: EngineEvent[] = [];
 
-    // Pig King 饱腹：不能摸牌（但可以出牌/用技能）
+    // Pig King：消化完成的牌必须先处理，不能结束回合
+    if (player.mustPlayIid) {
+      return this.invalid(sessionId, '必须先处理消化获得的牌（打出或丢弃）');
+    }
+
+    // Pig King 饱腹：不能摸牌，直接结束回合（跳过摸牌，避免无牌可出时卡死）
     if (player.fullTurns > 0) {
-      return this.invalid(sessionId, '饱腹中，不能摸牌 🐷');
+      this.log(events, `🐷 ${player.name} 饱腹中，跳过摸牌结束回合`);
+      return this.finishTurn(events);
+    }
+
+    // 秀英冰冻：无法出牌和摸牌，直接结束回合
+    if (this.isFrozen(player)) {
+      this.log(events, `🧊 ${player.name} 冰冻中（剩 ${player.freezeLayers} 层），跳过摸牌结束回合`);
+      return this.finishTurn(events);
     }
 
     // Pig King 暴食：每次多摸 1 张
     let draws = this.worldRuleId === 'double-down' ? 2 : 1;
     if (player.characterId === 'pig_king') draws += 1;
+
+    // 数学老师减法：下一次摸牌少摸 1 张（最少 0）
+    if (player.mathSubDraw > 0) {
+      draws = Math.max(0, draws - player.mathSubDraw);
+      player.mathSubDraw = 0;
+      if (draws === 0) {
+        this.log(events, `📐 ${player.name} 受减法影响，这次一张牌都没摸到`);
+        return this.finishTurn(events);
+      }
+    }
 
     // Pig King 饱腹解除后：必须连摸 3 张
     if (player.forcedDraws > 0) {
@@ -933,7 +1324,12 @@ export class GameEngine {
         return events; // 眼泪处理完后自动继续
       }
 
-      if (c.cardId === 'exploding') {
+      if (this.isExploding(c)) {
+        // 邪恶苹果头自己摸到爆炸苹果：放回牌堆 + 再摸一张
+        if (this.tryAppleConvert(player, c, events)) {
+          if (drew >= draws) return this.finishTurn(events);
+          continue;
+        }
         const r = this.handleExplosion(player, c, events);
         if (r === 'suspend-defuse' || !player.alive) return events;
         if (drew >= draws) return this.finishTurn(events);
@@ -973,6 +1369,7 @@ export class GameEngine {
       message: { action: 'chaosDraw', fromName: player.name, cardName: this.defOf(stolen).name },
     });
     this.log(events, `🌀 混沌之触：${player.name} 从 ${victim.name} 手中夺取了 1 张牌`);
+    this.chaosRipple(events);
     return 'ok';
   }
 
@@ -1031,7 +1428,7 @@ export class GameEngine {
       const [defuse] = player.hand.splice(defuseIdx, 1);
       this.discard.push(defuse!);
       this.ev(events, { type: 'hand', sessionId: player.sessionId });
-      this.pendingDefuse = { sessionId: player.sessionId, instanceId: kitten.iid };
+      this.pendingDefuse = { sessionId: player.sessionId, instanceId: kitten.iid, cardId: kitten.cardId, needsCard: false };
       this.subPhase = 'awaiting-defuse';
       this.log(events, `${player.name} 摸到了爆炸猫，打出拆解 🔧`);
       objDefuse(player, events);
@@ -1044,8 +1441,22 @@ export class GameEngine {
       return 'suspend-defuse';
     }
 
+    // 香蕉女王：无拆解但覆盖期间手牌 ≥4 → 挂起等待「4 张香蕉兑换拆解」
+    if (player.characterId === 'banana' && this.bananaOverlayTurns > 0 && player.hand.length >= 4) {
+      this.pendingDefuse = { sessionId: player.sessionId, instanceId: kitten.iid, cardId: kitten.cardId, needsCard: true };
+      this.subPhase = 'awaiting-defuse';
+      this.log(events, `🍌 ${player.name} 摸到了爆炸猫！可以用 4 张香蕉兑换拆解……`);
+      this.ev(events, {
+        type: 'private',
+        sessionId: player.sessionId,
+        message: { action: 'promptDefuse', deckCount: this.deck.length, bananaSubstitute: true },
+      });
+      this.ev(events, { type: 'awaitingDefuse' });
+      return 'suspend-defuse';
+    }
+
     // 果奔猫：秘密藏起一张爆炸猫（手里已藏一张时再摸会当场爆炸）
-    const holdsExploding = player.hand.some((c) => c.cardId === 'exploding');
+    const holdsExploding = player.hand.some((c) => this.isExploding(c));
     const hasStreaking = player.hand.some((c) => c.cardId === 'streaking');
     if (hasStreaking && !holdsExploding) {
       player.hand.push(kitten);
@@ -1063,10 +1474,19 @@ export class GameEngine {
     }
 
     player.alive = false;
+    // 手牌洗回牌堆（与日志文案一致，也避免死亡导致牌池流失）
+    this.deck.push(...player.hand);
     player.hand = [];
     this.deathOrder.push(player.sessionId);
     this.lastDeath = { sessionId: player.sessionId, name: player.name, at: Date.now() };
     this.shuffle(this.deck);
+
+    // 身上的邪恶苹果随人一起销毁（不会变成爆炸苹果）
+    if (player.appleTurns > 0) {
+      player.appleTurns = 0;
+      player.appleFrom = '';
+      this.log(events, `🍏 ${player.name} 出局，身上的邪恶苹果也烂掉了`);
+    }
 
     // Nana：死亡后化作眼泪牌流入牌堆（非永久死亡时）
     if (player.characterId === 'nana' && !player.permanentDead) {
@@ -1094,20 +1514,40 @@ export class GameEngine {
     if (this.pendingDefuse.sessionId !== sessionId) {
       return this.invalid(sessionId, '不是你的拆解');
     }
+    if (this.pendingDefuse.needsCard) {
+      return this.invalid(sessionId, '你没有拆解，需要用 4 张香蕉兑换 🍌');
+    }
     if (!Number.isInteger(position) || position < 0 || position > this.deck.length) {
       return this.invalid(sessionId, '位置无效');
     }
     const events: EngineEvent[] = [];
-    const kitten: CardInstance = { iid: this.pendingDefuse.instanceId, cardId: 'exploding' };
+    const kitten: CardInstance = { iid: this.pendingDefuse.instanceId, cardId: this.pendingDefuse.cardId };
     this.pendingDefuse = null;
     this.subPhase = 'awaiting-action';
     this.deck.splice(this.deck.length - position, 0, kitten);
     const name = this.players.find((p) => p.sessionId === sessionId)?.name;
-    this.log(events, `${name} 把爆炸猫放回了牌堆第 ${position} 张（0=牌堆顶）`);
+    // 公开日志不泄露位置（放回位置只有拆解者本人知道）
+    this.log(events, `${name} 把爆炸猫放回了牌堆的某个位置 🔧`);
     this.ev(events, { type: 'defuseResolved' });
 
     if (this.queue) return this.runQueue(events);
     return this.finishTurn(events);
+  }
+
+  /** 房间超时兜底：普通拆解放回顶；香蕉兑换待处理则自动用前 4 张手牌兑换 */
+  autoDefuseOnTimeout(sessionId: string): EngineEvent[] {
+    if (this.subPhase !== 'awaiting-defuse' || this.pendingDefuse?.sessionId !== sessionId) {
+      return [];
+    }
+    if (this.pendingDefuse.needsCard) {
+      const p = this.players.find((x) => x.sessionId === sessionId);
+      if (p && p.hand.length >= 4) {
+        const cost = p.hand.slice(0, 4).map((c) => c.iid);
+        return this.handleBananaSubstitute(sessionId, { mode: 'defuse', costInstanceIds: cost, position: 0 });
+      }
+      return [];
+    }
+    return this.defusePosition(sessionId, 0);
   }
 
   alterFutureOrder(sessionId: string, order: number[]): EngineEvent[] {
@@ -1150,15 +1590,25 @@ export class GameEngine {
 
   private finishTurn(events: EngineEvent[]): EngineEvent[] {
     if (this.phase !== 'playing') return events;
+    // 回合结束：未提交的命运改写/揭发点选/求助作废（冷却已扣，防止白嫖看牌）
+    this.pendingFutureRewrite = null;
+    this.pendingExpose = null;
+    if (this.pendingHelp) {
+      this.pendingHelp = null;
+      this.ev(events, { type: 'helpResolved' });
+    }
 
     const current = this.current();
 
-    // 摸牌底：结束回合前从牌堆底摸一张（走统一的爆炸/藏猫结算）
-    if (this.pendingEndDraw && current?.alive) {
-      this.pendingEndDraw = null;
-      const c = this.deck.shift();
-      if (c) {
-        if (c.cardId === 'exploding') {
+    // 摸牌底：结束回合前从牌堆底摸 N 张（走统一的爆炸/藏猫结算；乘法可加倍）
+    if (this.pendingEndDrawCount > 0 && current?.alive) {
+      const n = this.pendingEndDrawCount;
+      this.pendingEndDrawCount = 0;
+      for (let i = 0; i < n; i++) {
+        const c = this.deck.shift();
+        if (!c) break;
+        if (this.isExploding(c)) {
+          if (this.tryAppleConvert(current, c, events)) continue;
           const r = this.handleExplosion(current, c, events);
           if (r === 'suspend-defuse' || !current.alive) return events;
           // streaking 藏猫 → 照常推进回合
@@ -1169,7 +1619,7 @@ export class GameEngine {
         }
       }
     }
-    this.pendingEndDraw = null;
+    this.pendingEndDrawCount = 0;
 
     let transfer = 0;
     if (current) {
@@ -1179,17 +1629,25 @@ export class GameEngine {
     }
 
     const attack = this.pendingAttack;
-    this.pendingAttack = null;
+    const attackMult = this.pendingAttackMult;
+    this.pendingAttack = false;
+    this.pendingAttackMult = 1;
 
     if (attack) {
-      // 攻击转移：受害者承担 攻击者剩余回合 + 2
-      const victimId = attack.targeted ?? this.nextAliveSessionId();
+      // 攻击转移：受害者承担 攻击者剩余回合 + 基础回合数（乘法双倍）
+      const victimId = this.nextAliveSessionId();
       const victim = this.players.find((p) => p.sessionId === victimId);
       if (victim && victim.alive) {
-        victim.turnsLeft = transfer + (this.worldRuleId === 'overdrive' ? 4 : 2);
+        const base = (this.worldRuleId === 'overdrive' ? 4 : 2) * attackMult;
+        victim.turnsLeft = transfer + base;
         this.turnIndex = this.turnOrder.indexOf(victim.sessionId);
         this.turnCount++;
-        this.log(events, `${victim.name} 被攻击，要连续行动 ${victim.turnsLeft} 个回合 ⚡`);
+        this.log(
+          events,
+          `${victim.name} 被攻击，要连续行动 ${victim.turnsLeft} 个回合 ⚡${attackMult > 1 ? '（乘法加倍）' : ''}`,
+        );
+        // 秀英冰冻：被攻击也算"被打上技能牌"，冰冻 -1
+        this.cardHitsFrozen(victim, '攻击', events);
         this.runTurnStartSkills(victim, events);
         this.ev(events, { type: 'turnAdvanced' });
         return events;
@@ -1239,13 +1697,22 @@ export class GameEngine {
       this.log(events, '🌀 混沌之触效果消退了');
     }
 
-    // Banana 大香蕉之怒：覆盖回合数递减
+    // Banana 大香蕉之怒：轮次制——所有存活玩家各经历一次回合开始即消退
+    // （攻击/跳过的连击回合不额外消耗；中途有人死亡则提前结束）
     if (this.bananaOverlayTurns > 0) {
-      this.bananaOverlayTurns--;
-      if (this.bananaOverlayTurns === 0) {
-        const banana = this.players.find((p) => p.characterId === 'banana');
-        if (banana) banana.isAngry = false;
-        this.log(events, '🍌 大香蕉之怒效果消退了');
+      if (this.bananaOverlaySeen.has(player.sessionId)) {
+        // 轮次回绕：本轮所有存活玩家都行动过了
+        this.bananaOverlayTurns--;
+        this.bananaOverlaySeen = new Set();
+        if (this.bananaOverlayTurns <= 0) {
+          this.bananaOverlayTurns = 0;
+          const banana = this.players.find((p) => p.characterId === 'banana');
+          if (banana) banana.isAngry = false;
+          this.log(events, '🍌 大香蕉之怒效果消退了');
+        }
+      }
+      if (this.bananaOverlayTurns > 0) {
+        this.bananaOverlaySeen.add(player.sessionId);
       }
     }
 
@@ -1262,9 +1729,10 @@ export class GameEngine {
         this.ev(events, {
           type: 'private',
           sessionId: player.sessionId,
-          message: { action: 'digestReady', cardName: this.defOf(digested).name },
+          message: { action: 'digestReady', cardName: this.defOf(digested).name, instanceId: digested.iid },
         });
-        this.log(events, `🐷 ${player.name} 消化完成，获得了【${this.defOf(digested).name}】！`);
+        // 公开日志不泄露消化获得的卡名（仅本人经私密消息得知）
+        this.log(events, `🐷 ${player.name} 消化完成，获得了一张牌！`);
 
         // 检查饱腹
         const pigSkill = this.skillOf(player, 'active');
@@ -1292,6 +1760,24 @@ export class GameEngine {
 
     // chaos_queen 涟漪被动重置
     player.rippleUsedThisTurn = false;
+    // v3：每回合重置的互动标记（秀英求助名单 / 荔枝次数）
+    player.askedHelp = [];
+    player.lycheeGivenThisTurn = 0;
+    player.helpedThisTurn = false;
+
+    // v4：邪恶苹果倒计时——存在 3 个回合后，第 4 个回合开始时变成爆炸苹果混入牌堆
+    if (player.appleTurns > 0 && player.alive) {
+      if (player.appleTurns === 1) {
+        player.appleTurns = 0;
+        player.appleFrom = '';
+        const pos = Math.floor(this.rng() * (this.deck.length + 1));
+        this.deck.splice(pos, 0, { iid: newIid('exploding-apple'), cardId: 'exploding-apple' });
+        this.log(events, `🍏 ${player.name} 身上的邪恶苹果熟透了——它变成了爆炸苹果混进了牌堆！`);
+      } else {
+        player.appleTurns--;
+        this.log(events, `🍏 ${player.name} 身上的邪恶苹果还剩 ${player.appleTurns} 回合（${player.appleTurns} 回合后变成爆炸苹果）`);
+      }
+    }
 
     // World Rule 传递快乐：随机一张传给下家
     if (this.worldRuleId === 'pass-joy' && player.alive && player.hand.length > 0) {
@@ -1303,8 +1789,9 @@ export class GameEngine {
         next.hand.push(card!);
         this.ev(events, { type: 'hand', sessionId: player.sessionId });
         this.ev(events, { type: 'hand', sessionId: next.sessionId });
-        const name = this.cardMap.get(card!.cardId)?.name ?? '';
-        this.log(events, `🎁 ${player.name} 传了一张牌给 ${next.name}（是${name}…才不告诉你）`);
+        // 公开日志不泄露传的什么牌
+        this.log(events, `🎁 ${player.name} 传了一张牌给 ${next.name}（是…才不告诉你）`);
+        this.chaosRipple(events);
       }
     }
     // World Rule 全员天眼：当前玩家看牌堆顶 1 张
@@ -1334,7 +1821,7 @@ export class GameEngine {
     if (this.phase !== 'playing') return false;
     const alive = this.players.filter((p) => p.alive);
     const holdsHidden = (p: EnginePlayer) =>
-      p.hand.some((c) => c.cardId === 'exploding');
+      p.hand.some((c) => this.isExploding(c));
     /** Nana 可复活（非永久死亡且眼泪未满）时不判负 */
     const canRevive = (p: EnginePlayer) =>
       p.characterId === 'nana' && !p.permanentDead && p.tearCount < 3;
@@ -1389,8 +1876,8 @@ export class GameEngine {
     if (!player || !player.alive) return this.invalid(sessionId, '你无法使用技能');
     if (this.current()?.sessionId !== sessionId) return this.invalid(sessionId, '还没轮到你');
 
-    const skill = this.skillOf(player, 'active');
-    if (!skill || skill.id !== input.skillId) return this.invalid(sessionId, '你没有这个主动技能');
+    const skill = this.activeSkillOf(player, input.skillId);
+    if (!skill) return this.invalid(sessionId, '你没有这个主动技能');
     if (
       skill.effect.kind !== 'activeSteal' &&
       skill.effect.kind !== 'activeRecycle' &&
@@ -1398,7 +1885,14 @@ export class GameEngine {
       skill.effect.kind !== 'bananaRage' &&
       skill.effect.kind !== 'pigGluttony' &&
       skill.effect.kind !== 'chaosWarp' &&
-      skill.effect.kind !== 'chaosTouch'
+      skill.effect.kind !== 'chaosTouch' &&
+      skill.effect.kind !== 'futureRewrite' &&
+      skill.effect.kind !== 'voyageSwap' &&
+      skill.effect.kind !== 'bigEyeExpose' &&
+      skill.effect.kind !== 'mathOp' &&
+      skill.effect.kind !== 'iceHelp' &&
+      skill.effect.kind !== 'iceLychee' &&
+      skill.effect.kind !== 'appleThrow'
     ) {
       return this.invalid(sessionId, '该技能不是主动技能');
     }
@@ -1451,10 +1945,14 @@ export class GameEngine {
       player.hand.push(stolen!);
       this.ev(events, { type: 'hand', sessionId: target.sessionId });
       this.ev(events, { type: 'hand', sessionId });
-      this.log(
-        events,
-        `${player.name} 发动「${skill.name}」，偷走了 ${target.name} 的【${this.cardMap.get(input.wantCardId)?.name}】🦹`,
-      );
+      // 公开日志不泄露卡名；当事人经私密消息得知
+      this.log(events, `${player.name} 发动「${skill.name}」，偷走了 ${target.name} 的 1 张牌 🦹`);
+      this.ev(events, {
+        type: 'private',
+        sessionId: target.sessionId,
+        message: { action: 'chaosDraw', fromName: player.name, cardName: this.defOf(stolen!).name },
+      });
+      this.chaosRipple(events);
       return events;
     }
 
@@ -1488,6 +1986,7 @@ export class GameEngine {
         events,
         `${player.name} 发动「${skill.name}」，与 ${target.name} 交换了全部手牌 ⚓（${player.hand.length} 张 ↔ ${target.hand.length} 张）`,
       );
+      this.chaosRipple(events);
       // 回合立即结束
       this.finishTurn(events);
       return events;
@@ -1495,18 +1994,145 @@ export class GameEngine {
 
     // ---- v2：新角色技能 ----
     if (skillEffect.kind === 'bananaRage') {
-      // Banana：大香蕉之怒（无拆解时才能发动）
+      // Banana：大香蕉之怒（无拆解时才能发动；3 次/局，冷却 3 回合，覆盖期间禁止再发动）
+      if (this.bananaOverlayTurns > 0) {
+        return this.invalid(sessionId, '大香蕉之怒正在生效，无法再次发动');
+      }
+      const cd = player.skillCooldowns[skill.id] ?? 0;
+      if (cd > 0) return this.invalid(sessionId, `大香蕉之怒冷却中（剩 ${cd} 回合）`);
       if (player.hand.some((c) => c.cardId === 'defuse')) {
         return this.invalid(sessionId, '手中有拆解时不能发动大香蕉之怒');
       }
       this.bananaOverlayTurns = skillEffect.overlayTurns;
+      // 轮次制：发动者本回合已开始，先记入本轮名单
+      this.bananaOverlaySeen = new Set([sessionId]);
       player.isAngry = true;
+      player.skillCooldowns[skill.id] = skill.cooldownTurns ?? 3;
       st.used++;
+      // 洗乱全场存活玩家手牌：打断位置记忆，让"覆盖"真正生效
+      for (const p of this.players) {
+        if (!p.alive) continue;
+        this.shuffle(p.hand);
+        this.ev(events, { type: 'hand', sessionId: p.sessionId });
+      }
       this.log(
         events,
-        `🍌 ${player.name} 发动「${skill.name}」！全场手牌变成了愤怒香蕉！（持续 ${skillEffect.overlayTurns} 回合）`,
+        `🍌 ${player.name} 发动「${skill.name}」！全场手牌变成了愤怒香蕉并被打乱！（持续一轮：所有存活玩家各行动一次）`,
       );
-      this.ev(events, { type: 'private', sessionId, message: { action: 'notice', text: '🍌 大香蕉之怒已发动！覆盖期间：4 张手牌=1 拆解，3 张=任意技能牌。' } });
+      this.ev(events, { type: 'private', sessionId, message: { action: 'notice', text: '🍌 大香蕉之怒已发动！覆盖持续一轮：点击手牌只会选中，2 张=任意技能牌，4 张=1 拆解；同名猫组合不可用。' } });
+      return events;
+    }
+
+    if (skillEffect.kind === 'mathOp') {
+      // 数学老师：四则运算（各自独立冷却，不能指定自己）
+      const cd = player.skillCooldowns[skill.id] ?? 0;
+      if (cd > 0) return this.invalid(sessionId, `「${skill.name}」冷却中（剩 ${cd} 回合）`);
+      const target = this.players.find((p) => p.sessionId === input.targetSessionId);
+      if (!target || !target.alive || target.sessionId === sessionId) {
+        return this.invalid(sessionId, '需要选择一名其他存活玩家（不能指定自己）');
+      }
+      // 冰冻（秀英）不受技能影响：技能无效，但冰冻 -1
+      if (this.frozenBlocksSkill(target, events, skill.name)) {
+        player.skillCooldowns[skill.id] = skillEffect.cooldownTurns;
+        return events;
+      }
+      player.skillCooldowns[skill.id] = skillEffect.cooldownTurns;
+      switch (skillEffect.op) {
+        case 'add': {
+          this.log(events, `📐 ${player.name} 对 ${target.name} 使用「加法」，${target.name} 立即摸一张牌`);
+          this.grantDraw(target, 1, events);
+          break;
+        }
+        case 'sub': {
+          target.mathSubDraw++;
+          this.log(events, `📐 ${player.name} 对 ${target.name} 使用「减法」，其下次摸牌少摸一张`);
+          break;
+        }
+        case 'mul': {
+          target.mathMulNext++;
+          this.log(events, `📐 ${player.name} 对 ${target.name} 使用「乘法」，其下一张功能牌触发两次`);
+          break;
+        }
+        case 'div': {
+          target.mathDivNext++;
+          this.log(events, `📐 ${player.name} 对 ${target.name} 使用「除法」，其下一张功能牌无法触发`);
+          break;
+        }
+      }
+      return events;
+    }
+
+    if (skillEffect.kind === 'iceHelp') {
+      // 秀英：救救老奶（冰冻时才能求助；等待被求助者回应）
+      if (player.freezeLayers <= 0) {
+        return this.invalid(sessionId, '已经解冻了，不需要求助');
+      }
+      const cd = player.skillCooldowns[skill.id] ?? 0;
+      if (cd > 0) return this.invalid(sessionId, `求助冷却中（剩 ${cd} 回合）`);
+      const target = this.players.find((p) => p.sessionId === input.targetSessionId);
+      if (!target || !target.alive || target.sessionId === sessionId) {
+        return this.invalid(sessionId, '需要选择一名其他存活玩家求助');
+      }
+      if (player.askedHelp.includes(target.sessionId)) {
+        return this.invalid(sessionId, '本回合已经问过这位玩家了');
+      }
+      player.askedHelp.push(target.sessionId);
+      this.pendingHelp = { ownerSessionId: sessionId, helperSessionId: target.sessionId };
+      this.subPhase = 'awaiting-help';
+      this.log(events, `🧊 ${player.name} 向 ${target.name} 求助：「救救我，孩子们！」`);
+      this.ev(events, { type: 'private', sessionId: target.sessionId, message: { action: 'helpPrompt', fromName: player.name } });
+      this.ev(events, { type: 'awaitingHelp' });
+      return events;
+    }
+
+    if (skillEffect.kind === 'iceLychee') {
+      // 秀英：乖孩子（解冻中或被帮助过的回合可以喂；每回合上限）
+      if (this.isFrozen(player)) {
+        return this.invalid(sessionId, '冰冻中无法喂荔枝（可先向其他玩家求助）');
+      }
+      const target = this.players.find((p) => p.sessionId === input.targetSessionId);
+      if (!target || !target.alive || target.sessionId === sessionId) {
+        return this.invalid(sessionId, '需要选择一名其他存活玩家（不能喂自己）');
+      }
+      if (player.lycheeGivenThisTurn >= skillEffect.perTurn) {
+        return this.invalid(sessionId, '本回合已经喂过荔枝了');
+      }
+      player.lycheeGivenThisTurn++;
+      target.lychees++;
+      this.log(events, `🍒 ${player.name} 喂给 ${target.name} 一颗荔枝（${target.lychees}/2）`);
+      if (target.lychees >= 2) {
+        target.lychees = 0;
+        const plains = [...this.cardMap.values()].filter((c) => c.kind === 'plain' && c.comboable);
+        if (plains.length > 0) {
+          const picked = plains[Math.floor(this.rng() * plains.length)]!;
+          target.hand.push({ iid: newIid(picked.id), cardId: picked.id });
+          this.ev(events, { type: 'hand', sessionId: target.sessionId });
+          this.log(events, `🍒 ${target.name} 集齐 2 颗荔枝，获得了一张普通小猫牌！`);
+        }
+      }
+      return events;
+    }
+
+    if (skillEffect.kind === 'appleThrow') {
+      // 邪恶苹果头：投掷邪恶苹果（每人最多 1 个；目标在自己回合内可吃掉）
+      const cd = player.skillCooldowns[skill.id] ?? 0;
+      if (cd > 0) return this.invalid(sessionId, `投掷苹果冷却中（剩 ${cd} 回合）`);
+      const target = this.players.find((p) => p.sessionId === input.targetSessionId);
+      if (!target || !target.alive || target.sessionId === sessionId) {
+        return this.invalid(sessionId, '需要选择一名其他存活玩家（不能扔自己）');
+      }
+      if (target.appleTurns > 0) {
+        return this.invalid(sessionId, '这位玩家身上已经有邪恶苹果了');
+      }
+      target.appleTurns = 3;
+      target.appleFrom = sessionId;
+      player.skillCooldowns[skill.id] = skillEffect.cooldownTurns;
+      this.log(events, `🍏 ${player.name} 朝 ${target.name} 扔了一个邪恶苹果！（3 回合内不吃就会变成爆炸苹果）`);
+      this.ev(events, {
+        type: 'private',
+        sessionId: target.sessionId,
+        message: { action: 'appleGiven', fromName: player.name, turns: 3 },
+      });
       return events;
     }
 
@@ -1518,6 +2144,11 @@ export class GameEngine {
       const target = this.players.find((p) => p.sessionId === input.targetSessionId);
       if (!target || !target.alive || target.sessionId === sessionId) {
         return this.invalid(sessionId, '需要选择一名其他存活玩家');
+      }
+      // 冰冻（秀英）不受技能影响
+      if (this.frozenBlocksSkill(target, events, skill.name)) {
+        player.skillCooldowns[skill.id] = skill.cooldownTurns ?? skillEffect.digestTurns;
+        return events;
       }
       const candidates = target.hand.filter((c) => c.cardId !== 'defuse');
       if (candidates.length === 0) {
@@ -1557,11 +2188,117 @@ export class GameEngine {
       return events;
     }
 
+    if (skillEffect.kind === 'futureRewrite') {
+      // future_queen：命运改写（看顶 5 张，等待 futureRewritePick）
+      const cd = player.skillCooldowns[skill.id] ?? 0;
+      if (cd > 0) return this.invalid(sessionId, `命运改写冷却中（剩 ${cd} 回合）`);
+      if (this.deck.length === 0) return this.invalid(sessionId, '牌堆是空的');
+      if (player.hand.length === 0) return this.invalid(sessionId, '命运改写需要 1 张手牌来交换');
+      const n = Math.min(skillEffect.peekCount, this.deck.length);
+      const top = this.deck.slice(this.deck.length - n).reverse();
+      this.pendingFutureRewrite = { sessionId, cards: top };
+      player.skillCooldowns[skill.id] = skill.cooldownTurns ?? skillEffect.cooldownTurns;
+      this.log(events, `🌠 ${player.name} 开始编织命运……（查看了牌堆顶 ${n} 张）`);
+      this.ev(events, {
+        type: 'private',
+        sessionId,
+        message: { action: 'futureRewrite', cards: top.map((i) => this.defOf(i)) },
+      });
+      return events;
+    }
+
+    if (skillEffect.kind === 'voyageSwap') {
+      // Voyage：与指定玩家换 N 张（自己可指定交出哪 N 张，对方随机），回合立即结束
+      const cd = player.skillCooldowns[skill.id] ?? 0;
+      if (cd > 0) return this.invalid(sessionId, `技能冷却中（剩 ${cd} 回合）`);
+      const target = this.players.find((p) => p.sessionId === input.targetSessionId);
+      if (!target || !target.alive || target.sessionId === sessionId) {
+        return this.invalid(sessionId, '需要选择一名其他存活玩家');
+      }
+      const n = skillEffect.count;
+      if (player.hand.length < n || target.hand.length < n) {
+        return this.invalid(sessionId, `双方手牌都需要至少 ${n} 张才能交换 ⚓`);
+      }
+      // 冰冻（秀英）不受技能影响
+      if (this.frozenBlocksSkill(target, events, skill.name)) {
+        player.skillCooldowns[skill.id] = skill.cooldownTurns ?? skillEffect.cooldownTurns;
+        return events;
+      }
+      // 自己交出的牌：可指定（恰好 N 张、不重复、均在手中）；未指定则随机（机器人）
+      const giveIds = input.costInstanceIds ?? [];
+      let mine: CardInstance[];
+      if (giveIds.length > 0) {
+        if (giveIds.length !== n || new Set(giveIds).size !== n) {
+          return this.invalid(sessionId, `需要指定 ${n} 张不重复的手牌交出 ⚓`);
+        }
+        mine = [];
+        for (const id of giveIds) {
+          const c = player.hand.find((x) => x.iid === id);
+          if (!c) return this.invalid(sessionId, '指定的手牌不在你手中');
+          mine.push(c);
+        }
+      } else {
+        mine = this.pickRandomFrom(player.hand, n);
+      }
+      // 对方始终随机
+      const theirs = this.pickRandomFrom(target.hand, n);
+      const mineSet = new Set(mine.map((c) => c.iid));
+      const theirsSet = new Set(theirs.map((c) => c.iid));
+      player.hand = [...player.hand.filter((c) => !mineSet.has(c.iid)), ...theirs];
+      target.hand = [...target.hand.filter((c) => !theirsSet.has(c.iid)), ...mine];
+      player.skillCooldowns[skill.id] = skill.cooldownTurns ?? skillEffect.cooldownTurns;
+      this.chaosRipple(events);
+      this.ev(events, { type: 'hand', sessionId });
+      this.ev(events, { type: 'hand', sessionId: target.sessionId });
+      // 公开日志不泄露交换了什么牌
+      this.log(events, `⚓ ${player.name} 发动「${skill.name}」，与 ${target.name} 交换了 ${n} 张手牌`);
+      // 回合立即结束
+      this.finishTurn(events);
+      return events;
+    }
+
+    if (skillEffect.kind === 'bigEyeExpose') {
+      // bigEye：揭发——按目标档案数执行查看/弃牌/抽牌，发动后档案清零
+      const cd = player.skillCooldowns[skill.id] ?? 0;
+      if (cd > 0) return this.invalid(sessionId, `揭发冷却中（剩 ${cd} 回合）`);
+      const target = this.players.find((p) => p.sessionId === input.targetSessionId);
+      if (!target || !target.alive || target.sessionId === sessionId) {
+        return this.invalid(sessionId, '需要选择一名其他存活玩家');
+      }
+      if (target.archives < 2) {
+        return this.invalid(sessionId, '该玩家的档案不足 2 个，无法揭发 👀');
+      }
+      // 冰冻（秀英）不受技能影响
+      if (this.frozenBlocksSkill(target, events, skill.name)) {
+        player.skillCooldowns[skill.id] = skill.cooldownTurns ?? skillEffect.cooldownTurns;
+        return events;
+      }
+      const mode: 'view' | 'discard' | 'steal' = target.archives >= 4 ? 'steal' : target.archives === 3 ? 'discard' : 'view';
+      player.skillCooldowns[skill.id] = skill.cooldownTurns ?? skillEffect.cooldownTurns;
+      const archives = target.archives;
+      target.archives = 0;
+      this.log(events, `👀 ${player.name} 揭发了 ${target.name}！（${archives} 个档案）`);
+      if (mode !== 'view') {
+        this.pendingExpose = { sessionId, targetSessionId: target.sessionId, mode };
+      }
+      this.ev(events, {
+        type: 'private',
+        sessionId,
+        message: {
+          action: 'exposePrompt',
+          targetName: target.name,
+          cards: target.hand.map((c) => ({ instanceId: c.iid, def: this.defOf(c) })),
+          mode,
+        },
+      });
+      return events;
+    }
+
     return this.invalid(sessionId, '该技能不是主动技能');
   }
 
   /* ------------------------------------------------------------------ */
-  /* v2：五角色新消息处理（暂为桩实现，逐步填充）                         */
+  /* v2：五角色新消息处理                                                 */
   /* ------------------------------------------------------------------ */
 
   /** 眼泪选择：accept=true 时 giveInstanceId 为要喂给 Nana 的牌 */
@@ -1579,19 +2316,32 @@ export class GameEngine {
     const nana = this.players.find((p) => p.characterId === 'nana');
     const events: EngineEvent[] = [];
 
-    // 从 pendingTear 恢复（眼泪牌不进手牌，直接在 pending 中）
+    // 先校验再消费 pendingTear：非法输入不吞眼泪，窗口保持可重试
+    if (input.accept) {
+      if (!nana || nana.permanentDead) {
+        return this.invalid(sessionId, 'Nana 已无法复活，只能拒绝');
+      }
+      if (!input.giveInstanceId) {
+        return this.invalid(sessionId, '需要选择一张要喂的牌');
+      }
+      if (!player.hand.some((c) => c.iid === input.giveInstanceId)) {
+        return this.invalid(sessionId, '要给的牌不在你手中');
+      }
+    }
+
+    // 校验通过，消费 pendingTear（眼泪牌不进手牌，直接在 pending 中）
     this.pendingTear = null;
     this.subPhase = 'awaiting-action';
 
     if (input.accept && input.giveInstanceId && nana && !nana.permanentDead) {
       // 选择喂给 Nana：弃 1 张手牌 → Nana 复活获得该牌
       const idx = player.hand.findIndex((c) => c.iid === input.giveInstanceId);
-      if (idx < 0) return this.invalid(sessionId, '要给的牌不在你手中');
       const [given] = player.hand.splice(idx, 1);
 
-      // Nana 复活
+      // Nana 复活（并从死亡序列中移除，保证 gameEnd 排名正确）
       nana.alive = true;
       nana.hand = [given!];
+      this.deathOrder = this.deathOrder.filter((id) => id !== nana.sessionId);
       this.ev(events, { type: 'revive', sessionId: nana.sessionId });
       this.ev(events, { type: 'hand', sessionId: nana.sessionId });
       this.ev(events, { type: 'hand', sessionId: player.sessionId });
@@ -1616,7 +2366,7 @@ export class GameEngine {
       for (let i = 0; i < 2; i++) {
         const c = this.deck.pop();
         if (!c) break;
-        if (c.cardId === 'exploding') {
+        if (this.isExploding(c)) {
           this.handleExplosion(player, c, events);
           return events;
         }
@@ -1658,28 +2408,411 @@ export class GameEngine {
     this.ev(events, { type: 'hand', sessionId });
   }
 
-  /** 香蕉货币替换 */
+  /** 香蕉货币替换（仅香蕉女王，大香蕉之怒覆盖期间） */
   handleBananaSubstitute(
     sessionId: string,
-    input: { mode: 'defuse' | 'action'; cardId?: string; costInstanceIds: string[] },
+    input: {
+      mode: 'defuse' | 'action';
+      cardId?: string;
+      costInstanceIds: string[];
+      position?: number;
+      targetSessionId?: string;
+    },
   ): EngineEvent[] {
-    return this.invalid(sessionId, '香蕉货币系统尚未实现');
+    const player = this.players.find((p) => p.sessionId === sessionId);
+    if (!player || !player.alive) return this.invalid(sessionId, '你无法使用香蕉兑换');
+    if (player.characterId !== 'banana') return this.invalid(sessionId, '只有香蕉女王能用香蕉兑换');
+    if (this.bananaOverlayTurns <= 0) return this.invalid(sessionId, '大香蕉之怒未激活');
+
+    const costCount = input.mode === 'defuse' ? 4 : 2;
+    const cost = input.costInstanceIds ?? [];
+    if (!Array.isArray(cost) || cost.length !== costCount || new Set(cost).size !== costCount) {
+      return this.invalid(sessionId, `需要 ${costCount} 张不重复的手牌作为代价`);
+    }
+    const costInstances: CardInstance[] = [];
+    for (const id of cost) {
+      const c = player.hand.find((x) => x.iid === id);
+      if (!c) return this.invalid(sessionId, '代价牌不在你手中');
+      costInstances.push(c);
+    }
+
+    const events: EngineEvent[] = [];
+
+    if (input.mode === 'defuse') {
+      // 4 张香蕉 = 1 拆解（在等待拆解时发动）
+      if (this.subPhase !== 'awaiting-defuse' || this.pendingDefuse?.sessionId !== sessionId) {
+        return this.invalid(sessionId, '现在不需要拆解');
+      }
+      const position = input.position ?? 0;
+      if (!Number.isInteger(position) || position < 0 || position > this.deck.length) {
+        return this.invalid(sessionId, '位置无效');
+      }
+      player.hand = player.hand.filter((c) => !costInstances.some((x) => x.iid === c.iid));
+      this.discard.push(...costInstances);
+      const kitten: CardInstance = { iid: this.pendingDefuse.instanceId, cardId: this.pendingDefuse.cardId };
+      this.pendingDefuse = null;
+      this.subPhase = 'awaiting-action';
+      this.deck.splice(this.deck.length - position, 0, kitten);
+      this.ev(events, { type: 'hand', sessionId });
+      this.log(events, `🍌 ${player.name} 用 4 张香蕉兑换了拆解！爆炸猫放回了牌堆某处 🔧`);
+      this.ev(events, { type: 'defuseResolved' });
+      if (this.queue) return this.runQueue(events);
+      return this.finishTurn(events);
+    }
+
+    // 2 张香蕉 = 任意动作牌立即打出（走否认窗口）
+    if (this.subPhase !== 'awaiting-action') return this.invalid(sessionId, '当前不能兑换');
+    if (this.current()?.sessionId !== sessionId) return this.invalid(sessionId, '还没轮到你');
+    if (!input.cardId) return this.invalid(sessionId, '需要指定要兑换的动作牌');
+    const def = this.cardMap.get(input.cardId);
+    if (!def || def.kind !== 'action' || input.cardId === 'nope') {
+      return this.invalid(sessionId, '只能兑换动作牌（不含否认）');
+    }
+    const needsTarget = def.effects.some(
+      (e) =>
+        e.type === 'stealRandom' ||
+        e.type === 'stealNamed' ||
+        e.type === 'peekHand' ||
+        e.type === 'swapHand',
+    );
+    if (needsTarget) {
+      const t = this.players.find((p) => p.sessionId === input.targetSessionId);
+      if (!t || !t.alive || t.sessionId === sessionId) {
+        return this.invalid(sessionId, '这张牌需要选择一名其他存活玩家作为目标');
+      }
+    }
+
+    // 数学老师乘法：兑换出的动作牌同样吃双倍
+    let exchangeEffects = def.effects;
+    let exchangeMul = false;
+    if (player.mathMulNext > 0) {
+      const doubled = this.doubleEffects(player, exchangeEffects);
+      if (doubled) {
+        exchangeEffects = doubled;
+        player.mathMulNext = 0;
+        exchangeMul = true;
+      }
+    }
+
+    player.hand = player.hand.filter((c) => !costInstances.some((x) => x.iid === c.iid));
+    this.discard.push(...costInstances);
+    this.ev(events, { type: 'hand', sessionId });
+
+    const instance: CardInstance = { iid: newIid(input.cardId), cardId: input.cardId };
+    const targetName = this.players.find((p) => p.sessionId === input.targetSessionId)?.name;
+    this.log(
+      events,
+      `🍌 ${player.name} 用 2 张香蕉兑换，打出了【${def.name}】${targetName ? `→ ${targetName}` : ''}`,
+    );
+    if (exchangeMul) {
+      this.log(events, `✖️ 乘法生效：【${def.name}】的效果触发了两次`);
+    }
+    // 秀英冰冻：被功能牌指定 → 冰冻 -1（卡牌效果照常生效）
+    if (needsTarget) {
+      this.cardHitsFrozen(
+        this.players.find((p) => p.sessionId === input.targetSessionId),
+        def.name,
+        events,
+      );
+    }
+    this.pendingPlay = {
+      playId: `play-${++instanceSeq}`,
+      sessionId,
+      instances: [instance],
+      combo: 'single',
+      effects: exchangeEffects,
+      targetSessionId: needsTarget ? input.targetSessionId : undefined,
+      wantCardId: undefined,
+      nopedBy: [],
+    };
+    this.lastPlay = {
+      playId: this.pendingPlay.playId,
+      bySessionId: sessionId,
+      byName: player.name,
+      cardIds: [instance.cardId],
+      at: Date.now(),
+      noped: false,
+      targetSessionId: needsTarget ? input.targetSessionId : undefined,
+    };
+    this.subPhase = 'awaiting-nope';
+    this.ev(events, { type: 'nopeWindowOpened' });
+    this.addArchive(sessionId);
+    if (!this.othersCanNope(sessionId)) {
+      events.push(...this.resolveNopes());
+    }
+    return events;
   }
 
-  /** Future女王命运改写 */
+  /** Future女王命运改写：选 1 张立即生效 + 手牌替换 + 按序放回 */
   handleFutureRewrite(
     sessionId: string,
-    input: { activateIdx: number; swapInstanceId: string; order: number[] },
+    input: {
+      activateIdx: number;
+      swapInstanceId: string;
+      order: number[];
+      targetSessionId?: string;
+    },
   ): EngineEvent[] {
-    return this.invalid(sessionId, '命运改写尚未实现');
+    const pending = this.pendingFutureRewrite;
+    if (!pending || pending.sessionId !== sessionId) {
+      return this.invalid(sessionId, '现在没有命运待改写');
+    }
+    if (this.phase !== 'playing') return this.invalid(sessionId, '对局未开始或已结束');
+    if (this.current()?.sessionId !== sessionId) return this.invalid(sessionId, '还没轮到你');
+    const player = this.players.find((p) => p.sessionId === sessionId)!;
+    const n = pending.cards.length;
+
+    const { activateIdx, swapInstanceId, order } = input;
+    if (!Number.isInteger(activateIdx) || activateIdx < 0 || activateIdx >= n) {
+      return this.invalid(sessionId, '生效牌选择无效');
+    }
+    const swapIdx = player.hand.findIndex((c) => c.iid === swapInstanceId);
+    if (swapIdx < 0) return this.invalid(sessionId, '交换牌不在你手中');
+
+    const activated = pending.cards[activateIdx]!;
+    const def = this.defOf(activated);
+    const needsTarget = def.effects.some(
+      (e) =>
+        e.type === 'stealRandom' ||
+        e.type === 'stealNamed' ||
+        e.type === 'peekHand' ||
+        e.type === 'swapHand',
+    );
+    let target: EnginePlayer | undefined;
+    if (needsTarget) {
+      target = this.players.find((p) => p.sessionId === input.targetSessionId);
+      if (!target || !target.alive || target.sessionId === sessionId) {
+        return this.invalid(sessionId, `激活【${def.name}】需要选择一名其他存活玩家`);
+      }
+    }
+
+    // 1) 摘走顶部 n 张；2) 激活牌生效；3) 手牌替换进去；4) 按选择顺序放回
+    const candidates = [...pending.cards.filter((_, i) => i !== activateIdx)];
+    const [swapCard] = player.hand.splice(swapIdx, 1);
+    candidates.push(swapCard!);
+    if (
+      !Array.isArray(order) ||
+      order.length !== candidates.length ||
+      new Set(order).size !== candidates.length ||
+      !order.every((i) => Number.isInteger(i) && i >= 0 && i < candidates.length)
+    ) {
+      // 撤销手牌摘取，等待重新提交
+      player.hand.splice(swapIdx, 0, swapCard!);
+      return this.invalid(sessionId, '放回顺序无效');
+    }
+    this.deck.splice(this.deck.length - n, n);
+    const newTop = order.map((i) => candidates[i]!); // 自顶向下
+    this.deck.push(...[...newTop].reverse());
+
+    this.pendingFutureRewrite = null;
+    const events: EngineEvent[] = [];
+    this.ev(events, { type: 'hand', sessionId });
+    const targetName = target?.name;
+    this.log(
+      events,
+      `🌠 ${player.name} 改写了命运，激活了【${def.name}】！${targetName ? `→ ${targetName}` : ''}`,
+    );
+
+    // 激活牌立即生效（等同亲自打出；攻击/跳过/摸牌底语义在 finishTurn 收尾）
+    const play: PendingPlay = {
+      playId: `rewrite-${++instanceSeq}`,
+      sessionId,
+      instances: [activated],
+      combo: 'single',
+      effects: def.effects,
+      targetSessionId: target?.sessionId,
+      wantCardId: undefined,
+      nopedBy: [],
+    };
+    this.discard.push(activated);
+    this.lastPlay = {
+      playId: play.playId,
+      bySessionId: sessionId,
+      byName: player.name,
+      cardIds: [activated.cardId],
+      at: Date.now(),
+      noped: false,
+      targetSessionId: target?.sessionId,
+    };
+    let suspended = false;
+    for (const effect of def.effects) {
+      if (this.phase !== 'playing' || !player.alive) break;
+      const r = this.applyEffect(play, effect, events);
+      if (r === 'suspend-defuse' || r === 'suspend-alter') {
+        suspended = true;
+        break;
+      }
+    }
+    if (suspended || !player.alive || this.phase !== 'playing') return events;
+    if (def.effects.some((e) => e.type === 'skip')) {
+      return this.finishTurn(events); // 跳过：立即结束回合不摸牌
+    }
+    if (def.effects.some((e) => e.type === 'attack')) {
+      this.pendingAttack = true; // finishTurn 转移连击
+      return this.finishTurn(events);
+    }
+    return events;
   }
 
-  /** Pig King 打出消化完成的牌 */
-  handleDigestPlay(
+  /** Pig King：直接丢弃消化完成且必须处理的牌（白板/否认等无法正常打出时的出口） */
+  handleDigestPlay(sessionId: string, input: { instanceId: string }): EngineEvent[] {
+    if (this.phase !== 'playing' || this.subPhase !== 'awaiting-action') {
+      return this.invalid(sessionId, '现在不能丢弃');
+    }
+    const player = this.current();
+    if (!player || player.sessionId !== sessionId) return this.invalid(sessionId, '还没轮到你');
+    if (!player.mustPlayIid || player.mustPlayIid !== input.instanceId) {
+      return this.invalid(sessionId, '只能丢弃消化获得的那张牌');
+    }
+    const idx = player.hand.findIndex((c) => c.iid === input.instanceId);
+    if (idx < 0) return this.invalid(sessionId, '这张牌不在你手中');
+    const [card] = player.hand.splice(idx, 1);
+    this.discard.push(card!);
+    player.mustPlayIid = null;
+    const events: EngineEvent[] = [];
+    this.ev(events, { type: 'hand', sessionId });
+    this.log(events, `🐷 ${player.name} 丢弃了消化完成的牌`);
+    return events;
+  }
+
+  /** bigEye 揭发点选：从目标手中弃掉（discard）或抽取（steal）一张牌 */
+  /**
+   * 秀英求助回应：被求助者同意（交一张牌，冰冻 -1，秀英本回合可正常行动）或拒绝（可继续问别人）。
+   * 超时由房间层调用 autoRefuseHelp。
+   */
+  handleHelpRespond(
     sessionId: string,
-    input: { instanceId: string },
+    input: { accept: boolean; giveInstanceId?: string },
   ): EngineEvent[] {
-    return this.invalid(sessionId, '消化系统尚未实现');
+    const pending = this.pendingHelp;
+    if (!pending || pending.helperSessionId !== sessionId) {
+      return this.invalid(sessionId, '现在没有向你发起的求助');
+    }
+    if (this.phase !== 'playing') return this.invalid(sessionId, '对局未开始或已结束');
+    const owner = this.players.find((p) => p.sessionId === pending.ownerSessionId);
+    const helper = this.players.find((p) => p.sessionId === pending.helperSessionId);
+    if (!owner || !helper) {
+      this.pendingHelp = null;
+      this.subPhase = 'awaiting-action';
+      return this.invalid(sessionId, '求助双方已离场');
+    }
+    const events: EngineEvent[] = [];
+    this.pendingHelp = null;
+    this.subPhase = 'awaiting-action';
+    this.ev(events, { type: 'helpResolved' });
+
+    if (!input.accept) {
+      this.log(events, `🧊 ${helper.name} 拒绝了 ${owner.name} 的求助`);
+      this.ev(events, {
+        type: 'private',
+        sessionId: owner.sessionId,
+        message: { action: 'helpResolved', accepted: false, helperName: helper.name },
+      });
+      return events;
+    }
+
+    const card = helper.hand.find((c) => c.iid === input.giveInstanceId);
+    if (!card) {
+      return this.invalid(sessionId, '请选择一张要交出的手牌');
+    }
+    helper.hand = helper.hand.filter((c) => c.iid !== card.iid);
+    owner.hand.push(card);
+    owner.freezeLayers = Math.max(0, owner.freezeLayers - 1);
+    owner.helpedThisTurn = true; // 本回合可正常出牌/摸牌（即使仍有冰冻层）
+    this.ev(events, { type: 'hand', sessionId: helper.sessionId });
+    this.ev(events, { type: 'hand', sessionId: owner.sessionId });
+    this.log(
+      events,
+      `🧊 ${helper.name} 帮助了 ${owner.name}（冰冻 -1，剩 ${owner.freezeLayers} 层），本回合可以正常行动`,
+    );
+    if (owner.freezeLayers === 0) {
+      this.log(events, `🧊 ${owner.name} 解冻了！可以正常出牌和摸牌了`);
+    }
+    this.ev(events, {
+      type: 'private',
+      sessionId: owner.sessionId,
+      message: { action: 'helpResolved', accepted: true, helperName: helper.name },
+    });
+    this.chaosRipple(events);
+    return events;
+  }
+
+  /** 求助超时：视为拒绝（房间层计时调用） */
+  autoRefuseHelp(): EngineEvent[] {
+    const pending = this.pendingHelp;
+    if (!pending) return [];
+    return this.handleHelpRespond(pending.helperSessionId, { accept: false });
+  }
+
+  /** 邪恶苹果头：吃掉身上的邪恶苹果（自己回合内可用，交出一张手牌给投掷者） */
+  handleAppleEat(sessionId: string, input: { giveInstanceId: string }): EngineEvent[] {
+    const player = this.players.find((p) => p.sessionId === sessionId);
+    if (!player || !player.alive) return this.invalid(sessionId, '你无法吃苹果');
+    if (this.phase !== 'playing') return this.invalid(sessionId, '对局未开始或已结束');
+    if (this.subPhase !== 'awaiting-action' || this.current()?.sessionId !== sessionId) {
+      return this.invalid(sessionId, '只能在自己回合吃苹果');
+    }
+    if (player.appleTurns <= 0) return this.invalid(sessionId, '你身上没有邪恶苹果');
+    const card = player.hand.find((c) => c.iid === input.giveInstanceId);
+    if (!card) return this.invalid(sessionId, '请选择一张要交出的手牌');
+
+    const events: EngineEvent[] = [];
+    const thrower = this.players.find((p) => p.sessionId === player.appleFrom && p.alive);
+    player.hand = player.hand.filter((c) => c.iid !== card.iid);
+    this.ev(events, { type: 'hand', sessionId });
+    if (thrower) {
+      thrower.hand.push(card);
+      this.ev(events, { type: 'hand', sessionId: thrower.sessionId });
+      this.log(events, `🍏 ${player.name} 吃掉了邪恶苹果，把一张手牌交给了 ${thrower.name}`);
+    } else {
+      this.discard.push(card);
+      this.log(events, `🍏 ${player.name} 吃掉了邪恶苹果（投掷者已出局，牌进了弃牌堆）`);
+    }
+    player.appleTurns = 0;
+    player.appleFrom = '';
+    this.chaosRipple(events);
+    return events;
+  }
+
+  handleExposePick(sessionId: string, input: { instanceId: string }): EngineEvent[] {
+    const pending = this.pendingExpose;
+    if (!pending || pending.sessionId !== sessionId) {
+      return this.invalid(sessionId, '现在没有揭发待处理');
+    }
+    if (this.phase !== 'playing') return this.invalid(sessionId, '对局未开始或已结束');
+    if (this.current()?.sessionId !== sessionId) return this.invalid(sessionId, '还没轮到你');
+    const player = this.players.find((p) => p.sessionId === sessionId)!;
+    const target = this.players.find((p) => p.sessionId === pending.targetSessionId);
+    if (!target || !target.alive) {
+      this.pendingExpose = null;
+      return this.invalid(sessionId, '目标已出局');
+    }
+    const idx = target.hand.findIndex((c) => c.iid === input.instanceId);
+    if (idx < 0) return this.invalid(sessionId, '这张牌不在对方手中');
+
+    const [card] = target.hand.splice(idx, 1);
+    this.pendingExpose = null;
+    const events: EngineEvent[] = [];
+    this.ev(events, { type: 'hand', sessionId: target.sessionId });
+    if (pending.mode === 'discard') {
+      this.discard.push(card!);
+      this.log(events, `👀 ${player.name} 指定 ${target.name} 弃掉了一张牌`);
+      this.ev(events, {
+        type: 'private',
+        sessionId: target.sessionId,
+        message: { action: 'chaosDraw', fromName: player.name, cardName: this.defOf(card!).name },
+      });
+    } else {
+      player.hand.push(card!);
+      this.ev(events, { type: 'hand', sessionId });
+      this.log(events, `👀 ${player.name} 从 ${target.name} 手中抽走了一张牌`);
+      this.ev(events, {
+        type: 'private',
+        sessionId: target.sessionId,
+        message: { action: 'chaosDraw', fromName: player.name, cardName: this.defOf(card!).name },
+      });
+    }
+    return events;
   }
 
   /* ------------------------------------------------------------------ */

@@ -26,7 +26,6 @@ import { BuildSection, RulesCodex } from '../components/BuildEditor';
 const EFFECT_LABEL: Record<string, string> = {
   skip: '跳过（结束回合不摸牌）',
   attack: '攻击（下家连走 2 回合）',
-  targetedAttack: '精准攻击（指定玩家连走 2 回合）',
   shuffle: '洗牌',
   peek: '预知未来（看牌堆顶 3 张）',
   alterFuture: '改变未来（重排牌堆顶 3 张）',

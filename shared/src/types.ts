@@ -16,7 +16,6 @@
 export type CardEffectType =
   | 'skip' // 结束回合且不摸牌
   | 'attack' // 结束回合，下一位玩家连走 2 回合
-  | 'targetedAttack' // 结束回合，指定某位玩家连走 2 回合
   | 'shuffle' // 洗牌堆
   | 'peek' // 私密查看牌堆顶 count 张（默认 3）
   | 'alterFuture' // 查看并重排牌堆顶 3 张
@@ -32,7 +31,6 @@ export type CardEffectType =
 export const CUSTOM_CARD_ALLOWED_EFFECTS: readonly CardEffectType[] = [
   'skip',
   'attack',
-  'targetedAttack',
   'shuffle',
   'peek',
   'alterFuture',
@@ -124,7 +122,18 @@ export type SkillEffect =
   | { kind: 'chaosWarp'; cooldownTurns: number } // chaos_queen 主动1：反转出牌顺序
   | { kind: 'chaosTouch'; cooldownTurns: number } // chaos_queen 主动2：全场摸牌变为偷牌
   | { kind: 'futureEye'; peekCount: number; bonusPeekCards: number; cooldownTurns: number } // future_queen：强化预知+命运改写
-  | { kind: 'forcedExtraDraw'; extra: number }; // 被动：每次摸牌多摸 N 张（Pig King 暴食用）
+  | { kind: 'futureRewrite'; peekCount: number; cooldownTurns: number } // future_queen 主动：命运改写
+  | { kind: 'voyageSwap'; count: number; cooldownTurns: number } // Voyage：随机交换 N 张手牌
+  | { kind: 'bigEyeExpose'; cooldownTurns: number; maxArchives: number } // bigEye：揭发（档案系统）
+  | { kind: 'forcedExtraDraw'; extra: number } // 被动：每次摸牌多摸 N 张（Pig King 暴食用）
+  // ---- v3 新增原型（数学老师 / 秀英） ----
+  | { kind: 'mathOp'; op: 'add' | 'sub' | 'mul' | 'div'; cooldownTurns: number } // 数学老师：四则运算
+  | { kind: 'iceFrozen'; layers: number } // 秀英被动：开局 N 层冰冻
+  | { kind: 'iceHelp'; cooldownTurns: number } // 秀英主动1：求助解冻（冰冻时可用）
+  | { kind: 'iceLychee'; perTurn: number } // 秀英主动2：喂荔枝（解冻时可用）
+  // ---- v4 新增原型（邪恶苹果头） ----
+  | { kind: 'appleBomb'; count: number } // 被动：开局往牌堆插入 N 张爆炸苹果
+  | { kind: 'appleThrow'; cooldownTurns: number }; // 主动：投掷邪恶苹果（目标可在自己回合吃掉）
 
 export interface SkillDef {
   id: string;
@@ -188,7 +197,11 @@ export function defuseTotal(playerCount: number): number {
 
 /** 客户端 → 服务端 */
 export type ClientMessage =
-  | { action: 'startGame' }
+  | {
+      action: 'startGame';
+      /** 普通房：开局时真人不足此数则自动补机器人到此人数（0/缺省 = 不补，2~8） */
+      fillTo?: number;
+    }
   | { action: 'setCharacter'; characterId: string | null }
   | {
       action: 'setDeck';
@@ -213,15 +226,36 @@ export type ClientMessage =
   | {
       action: 'useSkill';
       skillId: string;
+      /** 旧版主动技的代价牌；voyageSwap 用它指定要交出的 N 张手牌 */
       costInstanceIds?: string[];
       targetSessionId?: string;
       wantCardId?: string;
     }
   /* ---- v2：五角色新消息 ---- */
   | { action: 'tearChoice'; accept: boolean; giveInstanceId?: string } // 眼泪选择：true=喂牌复活Nana
-  | { action: 'bananaSubstitute'; mode: 'defuse' | 'action'; cardId?: string; costInstanceIds: string[] } // 香蕉货币替换
-  | { action: 'futureRewritePick'; activateIdx: number; swapInstanceId: string; order: number[] } // Future女王：选激活+替换+重排
-  | { action: 'digestPlay'; instanceId: string }; // Pig King：打出消化完成的牌
+  | {
+      action: 'bananaSubstitute';
+      mode: 'defuse' | 'action';
+      cardId?: string;
+      costInstanceIds: string[];
+      /** mode=defuse：爆炸猫放回位置（0=顶） */
+      position?: number;
+      /** mode=action 且目标卡需要目标时给 */
+      targetSessionId?: string;
+    } // 香蕉货币替换（仅香蕉女王，覆盖期间）
+  | {
+      action: 'futureRewritePick';
+      activateIdx: number;
+      swapInstanceId: string;
+      order: number[];
+      /** 激活的卡需要目标时给 */
+      targetSessionId?: string;
+    } // Future女王：选激活+替换+重排
+  | { action: 'digestPlay'; instanceId: string } // Pig King：打出消化完成的牌
+  | { action: 'exposePick'; instanceId: string } // 大眼Nana：揭发后点选要弃/抽的牌
+  /* ---- v3：数学老师 / 秀英 ---- */
+  | { action: 'helpRespond'; accept: boolean; giveInstanceId?: string } // 秀英求助：被求助者回应（同意需给一张牌）
+  | { action: 'appleEat'; giveInstanceId: string }; // 邪恶苹果头：吃掉身上的邪恶苹果（交出一张手牌给她）
 
 /** 服务端 → 客户端（私密/一次性消息；公开状态走 schema 同步） */
 export type ServerMessage =
@@ -229,7 +263,7 @@ export type ServerMessage =
   | { action: 'peekDeck'; cards: CardDef[]; playId?: string } // 私密看牌
   | { action: 'peekHand'; playerName: string; cards: CardDef[] }
   | { action: 'alterPrompt'; cards: CardDef[] } // 请重排这 3 张
-  | { action: 'promptDefuse'; deckCount: number } // 请选择爆炸猫放回位置
+  | { action: 'promptDefuse'; deckCount: number; bananaSubstitute?: boolean } // 请选择爆炸猫放回位置（bananaSubstitute=可用4张香蕉兑换）
   | { action: 'error'; message: string }
   | { action: 'notice'; text: string } // 私密提示（如藏猫通知，不进公开日志语义）
   | { action: 'objectiveDone'; defId: string; defName: string } // 秘密任务达成
@@ -244,9 +278,20 @@ export type ServerMessage =
   | { action: 'tearPrompt'; isNana: boolean; nanaName: string } // 你摸到了眼泪牌
   | { action: 'bananaRage'; playerName: string; turns: number } // Banana 发动大香蕉之怒
   | { action: 'futureRewrite'; cards: CardDef[] } // Future女王命运改写：查看顶5张
-  | { action: 'digestReady'; cardName: string } // Pig King 消化完成
+  | { action: 'digestReady'; cardName: string; instanceId: string } // Pig King 消化完成（必须打出/丢弃的牌）
   | { action: 'chaosTouch'; playerName: string } // 混沌之触激活
-  | { action: 'chaosDraw'; fromName: string; cardName: string }; // 混沌之触：你被偷了一张
+  | { action: 'chaosDraw'; fromName: string; cardName: string } // 混沌之触：你被偷了一张
+  | {
+      action: 'exposePrompt';
+      targetName: string;
+      cards: Array<{ instanceId: string; def: CardDef }>;
+      mode: 'view' | 'discard' | 'steal';
+    } // 大眼Nana：揭发展示目标牌面（discard/steal 需点选一张）
+  /* ---- v3：数学老师 / 秀英 ---- */
+  | { action: 'helpPrompt'; fromName: string } // 秀英向你求助：是否给一张牌帮她解冻
+  | { action: 'helpResolved'; accepted: boolean; helperName?: string } // 求助结果（给秀英）
+  /* ---- v4：邪恶苹果头 ---- */
+  | { action: 'appleGiven'; fromName: string; turns: number }; // 你被投掷了邪恶苹果（可在自己回合吃掉）
 
 /** 手牌中的单张实例（发给本人时带定义） */
 export interface HandCard {

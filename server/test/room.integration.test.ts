@@ -108,12 +108,20 @@ describe('GameRoom 集成', () => {
 
     act(host, { action: 'startGame' });
     await waitFor(() => host.room.state.phase === 'playing', 4000, '游戏开始');
-    await waitFor(() => host.hand.length === 7, 4000, '房主手牌 7 张');
-    await waitFor(() => guest.hand.length === 7, 4000, '客人手牌 7 张');
+    // 传递快乐规则下，开局先手回合开始即传 1 张牌：先手 6 张 / 后手 8 张
+    const rule = host.room.state.worldRuleId as string;
+    const firstSid = () => host.room.state.turnOrder[host.room.state.turnIndex] as string;
+    const expectedHand = (sid: string) => (rule === 'pass-joy' ? (sid === firstSid() ? 6 : 8) : 7);
+    await waitFor(() => host.hand.length === expectedHand(host.room.sessionId), 4000, '房主手牌');
+    await waitFor(
+      () => guest.hand.length === expectedHand(guest.room.sessionId),
+      4000,
+      '客人手牌',
+    );
 
     // 公开状态只含 handCount，不含手牌内容（防作弊）
-    host.room.state.players.forEach((ps: any) => {
-      expect(ps.handCount).toBe(7);
+    host.room.state.players.forEach((ps: any, sid: string) => {
+      expect(ps.handCount).toBe(expectedHand(sid));
       expect(ps.hand).toBeUndefined();
     });
 
@@ -122,10 +130,8 @@ describe('GameRoom 集成', () => {
     const first = firstId === host.room.sessionId ? host : guest;
     const other = firstId === host.room.sessionId ? guest : host;
 
-    // 先手打出一张牌（找一张可出的：有 effects 的或用组合）
-    const playable = first.hand.find((c) =>
-      c.def.effects.length > 0 && c.def.effects[0]!.type !== 'targetedAttack',
-    );
+    // 先手打出一张牌（找一张可出的：有 effects 的即可）
+    const playable = first.hand.find((c) => c.def.effects.length > 0);
     expect(playable).toBeTruthy();
     let handBefore = first.hand.length;
     const targetNeeded = playable!.def.effects.some(
@@ -140,7 +146,12 @@ describe('GameRoom 集成', () => {
       instanceId: playable!.instanceId,
       targetSessionId: targetNeeded ? other.room.sessionId : undefined,
     });
-    await waitFor(() => first.hand.length === handBefore - 1, 4000, '出牌后手牌减少');
+    // 求赠/疯狂抽卡等会使手牌数净变化为 0，改断言该牌确实离开手牌
+    await waitFor(
+      () => !first.hand.some((c) => c.instanceId === playable!.instanceId),
+      4000,
+      '出牌生效（该牌离开手牌）',
+    );
     await waitFor(() => (host.room.state.discardCount as number) >= 1, 4000, '弃牌堆出现');
 
     // 非当前玩家摸牌 → 非法（出牌可能已切换回合，重新判定当前玩家）

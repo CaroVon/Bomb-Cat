@@ -63,15 +63,19 @@ describe('回合计时器', () => {
 
     expect(host.room.state.phase).toBe('playing');
     expect(host.room.state.turnEndsAt).toBeGreaterThan(0);
-    const deckBefore = host.room.state.deckCount as number;
+    let deckBefore = 0;
+    let logBefore = 0;
+    (host.room.state.deck as unknown as number); // schema 触发同步
+    host.room.state.log.forEach(() => logBefore++);
+    deckBefore = host.room.state.deckCount as number;
 
     // 什么都不做，等 3 个超时周期（400ms × 3 + 冗余）
     await wait(1600);
 
-    const deckAfter = host.room.state.deckCount as number;
-    // 超时自动行动已发生：牌堆净减少（摸到爆炸猫拆解放回时单回合净变化为 0，
-    // 但多个周期内必然夹杂普通摸牌 → 总量下降）
-    expect(deckAfter).toBeLessThan(deckBefore);
+    let logAfter = 0;
+    host.room.state.log.forEach(() => logAfter++);
+    // 超时自动行动已发生（日志增长；死亡手牌洗回机制下牌堆数不再是单调递减）
+    expect(logAfter).toBeGreaterThan(logBefore);
 
     // 游戏仍在正常状态（没崩、没锁死）
     expect(['playing', 'finished']).toContain(host.room.state.phase);

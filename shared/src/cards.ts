@@ -14,6 +14,14 @@ export const BUILTIN_CARDS: CardDef[] = [
     effects: [],
   },
   {
+    id: 'exploding-apple',
+    name: '爆炸苹果',
+    kind: 'exploding',
+    emoji: '🍏',
+    description: '摸到即爆炸！邪恶苹果头自己摸到时可以悄悄放回牌堆再摸一张。',
+    effects: [],
+  },
+  {
     id: 'defuse',
     name: '拆解',
     kind: 'defuse',
@@ -28,14 +36,6 @@ export const BUILTIN_CARDS: CardDef[] = [
     emoji: '⚡',
     description: '立即结束你的回合且不摸牌，下一位玩家连续行动 2 个回合。',
     effects: [{ type: 'attack' }],
-  },
-  {
-    id: 'targetedAttack',
-    name: '精准攻击',
-    kind: 'action',
-    emoji: '🎯',
-    description: '立即结束你的回合，指定任意玩家连续行动 2 个回合。',
-    effects: [{ type: 'targetedAttack' }],
   },
   {
     id: 'skip',
@@ -188,7 +188,7 @@ export const BUILTIN_CARD_MAP: ReadonlyMap<string, CardDef> = new Map(
   BUILTIN_CARDS.map((c) => [c.id, c]),
 );
 
-/** 经典卡组（默认）——55 张动作牌，最多支撑 8 人满员开局 */
+/** 经典卡组（默认）——54 张动作牌（4 人基准），超过 4 人按比例放大 */
 export const CLASSIC_DECK: DeckDef = {
   id: 'classic',
   name: '经典卡组',
@@ -196,7 +196,6 @@ export const CLASSIC_DECK: DeckDef = {
   customCards: [],
   counts: {
     attack: 4,
-    targetedAttack: 1,
     skip: 4,
     favor: 4,
     shuffle: 4,
@@ -209,3 +208,13 @@ export const CLASSIC_DECK: DeckDef = {
     'plain-beard': 5,
   },
 };
+
+/** 经典卡组随人数缩放：≤4 人维持基准；>4 人每类牌 +floor(count×(n-4)/4)（只增不减，8 人约翻倍） */
+export function classicDeckFor(playerCount: number): DeckDef {
+  if (playerCount <= 4) return CLASSIC_DECK;
+  const counts: Record<string, number> = {};
+  for (const [cardId, count] of Object.entries(CLASSIC_DECK.counts)) {
+    counts[cardId] = count + Math.floor((count * (playerCount - 4)) / 4);
+  }
+  return { ...CLASSIC_DECK, counts };
+}

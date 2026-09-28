@@ -132,8 +132,8 @@ export function validateDeck(deck: DeckDef, playerCount: number): ValidationResu
       err(`${cardId}: 数量必须是自然数`);
       continue;
     }
-    if (cardId === 'exploding' || cardId === 'defuse') {
-      err('爆炸猫与拆解的数量由规则决定，不能自定义');
+    if (cardId === 'exploding' || cardId === 'defuse' || cardId === 'exploding-apple') {
+      err('爆炸猫/爆炸苹果与拆解的数量由规则决定，不能自定义');
       continue;
     }
     if (!BUILTIN_CARD_MAP.has(cardId) && !ids.has(cardId)) {
@@ -148,9 +148,9 @@ export function validateDeck(deck: DeckDef, playerCount: number): ValidationResu
   if (total > MAX_DECK_ACTION_CARDS) err(`卡组动作牌总数不能超过 ${MAX_DECK_ACTION_CARDS} 张`);
 
   if (deck.explodingCount !== undefined) {
-    const expected = playerCount - 1;
+    const expected = playerCount + 2;
     if (deck.explodingCount !== expected) {
-      err(`爆炸猫数量固定为玩家数-1（${expected}），当前 ${deck.explodingCount}`);
+      err(`爆炸猫数量固定为玩家数+2（${expected}），当前 ${deck.explodingCount}`);
     }
   }
 
@@ -207,10 +207,43 @@ export function validateSkill(skill: SkillDef, errors: string[]): boolean {
       break;
     case 'bananaRage':
       if ((effect.overlayTurns ?? 0) < 1 || (effect.overlayTurns ?? 0) > 5) {
-        return fail(errors, `${skill.id}: overlayTurns 必须在 1-5`);
+        return fail(errors, `${skill.id}: overlayTurns（持续轮数）必须在 1-5`);
       }
-      if ((effect.uses ?? 0) < 1 || (effect.uses ?? 0) > 2) {
-        return fail(errors, `${skill.id}: uses 必须在 1-2`);
+      if ((effect.uses ?? 0) < 1 || (effect.uses ?? 0) > 5) {
+        return fail(errors, `${skill.id}: uses 必须在 1-5`);
+      }
+      break;
+    case 'mathOp':
+      if (!['add', 'sub', 'mul', 'div'].includes(effect.op)) {
+        return fail(errors, `${skill.id}: op 必须是 add/sub/mul/div`);
+      }
+      if ((effect.cooldownTurns ?? 0) < 0 || (effect.cooldownTurns ?? 0) > 10) {
+        return fail(errors, `${skill.id}: cooldownTurns 必须在 0-10`);
+      }
+      break;
+    case 'iceFrozen':
+      if ((effect.layers ?? 0) < 1 || (effect.layers ?? 0) > 20) {
+        return fail(errors, `${skill.id}: layers 必须在 1-20`);
+      }
+      break;
+    case 'iceHelp':
+      if ((effect.cooldownTurns ?? 0) < 0 || (effect.cooldownTurns ?? 0) > 10) {
+        return fail(errors, `${skill.id}: cooldownTurns 必须在 0-10`);
+      }
+      break;
+    case 'iceLychee':
+      if ((effect.perTurn ?? 0) < 1 || (effect.perTurn ?? 0) > 3) {
+        return fail(errors, `${skill.id}: perTurn 必须在 1-3`);
+      }
+      break;
+    case 'appleBomb':
+      if ((effect.count ?? 0) < 1 || (effect.count ?? 0) > 3) {
+        return fail(errors, `${skill.id}: count 必须在 1-3`);
+      }
+      break;
+    case 'appleThrow':
+      if ((effect.cooldownTurns ?? 0) < 0 || (effect.cooldownTurns ?? 0) > 10) {
+        return fail(errors, `${skill.id}: cooldownTurns 必须在 0-10`);
       }
       break;
     case 'pigGluttony':
@@ -243,6 +276,30 @@ export function validateSkill(skill: SkillDef, errors: string[]): boolean {
       }
       if ((effect.cooldownTurns ?? 0) < 1 || (effect.cooldownTurns ?? 0) > 10) {
         return fail(errors, `${skill.id}: cooldownTurns 必须在 1-10`);
+      }
+      break;
+    case 'futureRewrite':
+      if ((effect.peekCount ?? 0) < 3 || (effect.peekCount ?? 0) > 7) {
+        return fail(errors, `${skill.id}: peekCount 必须在 3-7`);
+      }
+      if ((effect.cooldownTurns ?? 0) < 1 || (effect.cooldownTurns ?? 0) > 10) {
+        return fail(errors, `${skill.id}: cooldownTurns 必须在 1-10`);
+      }
+      break;
+    case 'voyageSwap':
+      if ((effect.count ?? 0) < 1 || (effect.count ?? 0) > 5) {
+        return fail(errors, `${skill.id}: count 必须在 1-5`);
+      }
+      if ((effect.cooldownTurns ?? 0) < 1 || (effect.cooldownTurns ?? 0) > 10) {
+        return fail(errors, `${skill.id}: cooldownTurns 必须在 1-10`);
+      }
+      break;
+    case 'bigEyeExpose':
+      if ((effect.cooldownTurns ?? 0) < 1 || (effect.cooldownTurns ?? 0) > 10) {
+        return fail(errors, `${skill.id}: cooldownTurns 必须在 1-10`);
+      }
+      if ((effect.maxArchives ?? 0) < 2 || (effect.maxArchives ?? 0) > 6) {
+        return fail(errors, `${skill.id}: maxArchives 必须在 2-6`);
       }
       break;
     case 'forcedExtraDraw':
