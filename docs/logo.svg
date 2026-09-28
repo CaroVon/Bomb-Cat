@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2a1f4d"/>
+      <stop offset="1" stop-color="#120d24"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.40" r="0.62">
+      <stop offset="0" stop-color="#f5c542" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#f5c542" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="bomb" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#453d63"/>
+      <stop offset="1" stop-color="#1b1533"/>
+    </linearGradient>
+    <linearGradient id="ear" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4f4673"/>
+      <stop offset="1" stop-color="#241d40"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 底板 -->
+  <rect width="512" height="512" fill="#0f0b1e"/>
+  <rect width="512" height="512" rx="88" fill="url(#bg)"/>
+  <rect x="8" y="8" width="496" height="496" rx="82" fill="none" stroke="#e5b809" stroke-opacity="0.35" stroke-width="4"/>
+  <rect width="512" height="512" rx="88" fill="url(#glow)"/>
+
+  <!-- 耳朵 -->
+  <path d="M 176 190 L 148 78 L 262 132 Z" fill="url(#ear)" stroke="#e5b809" stroke-opacity="0.5" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M 336 190 L 364 78 L 250 132 Z" fill="url(#ear)" stroke="#e5b809" stroke-opacity="0.5" stroke-width="4" stroke-linejoin="round"/>
+
+  <!-- 引线与火花 -->
+  <path d="M 258 128 C 262 96 280 88 296 74" fill="none" stroke="#d9a441" stroke-width="11" stroke-linecap="round"/>
+  <g stroke="#ffce54" stroke-width="7" stroke-linecap="round">
+    <line x1="296" y1="74" x2="296" y2="44"/>
+    <line x1="296" y1="74" x2="272" y2="58"/>
+    <line x1="296" y1="74" x2="320" y2="58"/>
+    <line x1="296" y1="74" x2="282" y2="36"/>
+    <line x1="296" y1="74" x2="312" y2="38"/>
+  </g>
+  <circle cx="296" cy="66" r="10" fill="#ff6b6b"/>
+  <circle cx="296" cy="66" r="4.5" fill="#fff3c4"/>
+
+  <!-- 炸弹猫头部 -->
+  <circle cx="256" cy="252" r="122" fill="url(#bomb)" stroke="#e5b809" stroke-opacity="0.55" stroke-width="5"/>
+  <ellipse cx="212" cy="192" rx="42" ry="26" fill="#ffffff" opacity="0.08" transform="rotate(-28 212 192)"/>
+
+  <!-- 眼睛（狡黠眯眼） -->
+  <path d="M 196 246 Q 218 226 240 246" fill="none" stroke="#f5c542" stroke-width="10" stroke-linecap="round"/>
+  <path d="M 272 246 Q 294 226 316 246" fill="none" stroke="#f5c542" stroke-width="10" stroke-linecap="round"/>
+
+  <!-- 鼻子与坏笑 -->
+  <path d="M 248 274 L 264 274 L 256 284 Z" fill="#ff9e9e"/>
+  <path d="M 222 296 Q 256 322 290 296" fill="none" stroke="#f5c542" stroke-width="9" stroke-linecap="round"/>
+  <path d="M 284 300 Q 296 306 292 316" fill="none" stroke="#f5c542" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- 胡须 -->
+  <g stroke="#cbb7f0" stroke-width="5" stroke-linecap="round" opacity="0.85">
+    <line x1="146" y1="262" x2="196" y2="270"/>
+    <line x1="148" y1="288" x2="196" y2="286"/>
+    <line x1="366" y1="262" x2="316" y2="270"/>
+    <line x1="364" y1="288" x2="316" y2="286"/>
+  </g>
+
+  <!-- 字标 -->
+  <text x="256" y="436" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-weight="800" font-size="58" letter-spacing="6" fill="#f5c542">BOMB CAT</text>
+  <text x="256" y="474" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-weight="600" font-size="22" letter-spacing="10" fill="#b8a9e0">💥 炸弹猫 💥</text>
+</svg>

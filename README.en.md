@@ -1,6 +1,12 @@
+<p align="center"><img src="docs/logo.png" width="150" alt="BombCat logo" /></p>
+
 # 💥 BombCat
 
-[English](./README.md) | **简体中文**
+**English** | [简体中文](./README.md)
+
+<p align="center">
+  <b>Online multiplayer · 17 characters · world rules · custom decks — a web-based Exploding Kittens-style game, fully original</b>
+</p>
 
 A web-based Exploding Kittens–style party game with online multiplayer, deep customization, and an optional user system — fully original implementation.
 

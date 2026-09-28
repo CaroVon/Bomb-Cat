@@ -1,6 +1,12 @@
+<p align="center"><img src="docs/logo.png" width="150" alt="BombCat logo" /></p>
+
 # 💥 炸弹猫 BombCat
 
 [English](./README.en.md) | **简体中文**
+
+<p align="center">
+  <b>联机对战 · 17 位角色 · 全局规则 · 自定义卡组 —— 网页版炸弹猫，全部原创实现</b>
+</p>
 
 联机 + 深度定制 + 用户系统的网页版炸弹猫（Exploding Kittens 规则复刻，全部原创实现）。
 
