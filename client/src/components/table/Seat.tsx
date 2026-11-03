@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
+import { portraitUrl } from '../../lib/portraits';
 
 export interface SeatData {
   sessionId: string;
@@ -24,7 +25,7 @@ interface Props {
 }
 
 function SeatInner({ seat, isCurrent, bounced, emoji, timer, emote }: Props) {
-  const avatarUrl = `/assets/characters/${seat.characterId || 'none'}.jpg`;
+  const avatarUrl = portraitUrl(seat.characterId);
   return (
     <div
       className={[

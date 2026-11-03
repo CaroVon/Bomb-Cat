@@ -13,7 +13,8 @@ export type BotDecision =
   | { kind: 'alter'; order: number[] }
   | { kind: 'bananaAction'; cardId: string; costInstanceIds: string[] }
   | { kind: 'iceHelp'; targetSessionId: string }
-  | { kind: 'appleEat'; giveInstanceId: string };
+  | { kind: 'appleEat'; giveInstanceId: string }
+  | { kind: 'butcherCleave'; skillId: string; targetSessionId: string };
 
 const rand = () => Math.random();
 
@@ -70,6 +71,9 @@ export function decide(
     }
   }
 
+  // 被屠夫封锁：功能牌与技能都用不了，只能摸牌
+  if (me.lockedBy) return { kind: 'draw' };
+
   // 秀英冰冻：无法出牌/摸牌 → 优先向还没问过的玩家求助，否则结束回合
   if (me.freezeLayers > 0 && !me.helpedThisTurn) {
     const askable = e.players.filter(
@@ -106,6 +110,25 @@ export function decide(
   }
 
   const aliveOthers = e.players.filter((p) => p.alive && p.sessionId !== sid);
+
+  // 屠夫：层数够就剔骨——封锁手牌最多、不在冷却中的对手（避开冰冻的秀英）
+  const cleave = e.characterMap
+    .get(me.characterId)
+    ?.skills.find((s) => s.effect.kind === 'butcherCleave');
+  if (cleave && cleave.effect.kind === 'butcherCleave' && me.boneStacks >= cleave.effect.cost) {
+    const targets = aliveOthers.filter(
+      (p) => (me.butcherTargetCd[p.sessionId] ?? 0) <= 0 && p.freezeLayers <= 0 && !p.lockedBy,
+    );
+    const t = strongest(targets);
+    if (t && rand() < 0.8) return { kind: 'butcherCleave', skillId: cleave.id, targetSessionId: t };
+  }
+  // 屠夫压制：对被自己封锁的玩家，偷牌/攻击翻倍
+  const suppressed = aliveOthers.find((p) => p.lockedBy === sid && p.hand.length > 0);
+  const nextId = e.nextAliveSessionId();
+  if (me.characterId === 'butcher' && has('attack') && aliveOthers.some((p) => p.lockedBy === sid && p.sessionId === nextId) && rand() < 0.7) {
+    return { kind: 'play', instanceId: pick('attack') };
+  }
+
   const aliveCount = e.players.filter((p) => p.alive).length;
   // 信念：剩余爆炸猫 ≈ 存活人数 + 2（近似，不作弊）
   const danger = (aliveCount + 2) / Math.max(e.deck.length, 1);
@@ -134,8 +157,8 @@ export function decide(
 
   // 组合偷牌（含万能猫通配）
   const combo = findCombo(e, hand);
-  if (combo && rand() < 0.6) {
-    const target = strongest(aliveOthers);
+  if (combo && rand() < (suppressed ? 0.9 : 0.6)) {
+    const target = suppressed?.sessionId ?? strongest(aliveOthers);
     if (target) {
       if (combo.length === 3) {
         const want = pickWantCardId(e, aliveOthers);

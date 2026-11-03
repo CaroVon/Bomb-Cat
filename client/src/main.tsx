@@ -8,6 +8,7 @@ import RoomPage from './pages/RoomPage';
 import GamePage from './pages/GamePage';
 import EditorPage from './pages/EditorPage';
 import { unlockAudio } from './lib/sound';
+import { loadRuntimeConfig } from './lib/config';
 import './styles.css';
 
 // 浏览器音频策略：首次用户手势解锁 AudioContext（一次即可）
@@ -28,8 +29,11 @@ const router = createBrowserRouter([
   },
 ]);
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <RouterProvider router={router} />
-  </StrictMode>,
-);
+// 先读运行时配置（Cloudflare Pages 的 /config.json 指向当前后端隧道），再渲染
+void loadRuntimeConfig().finally(() => {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <RouterProvider router={router} />
+    </StrictMode>,
+  );
+});

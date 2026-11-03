@@ -54,6 +54,12 @@ export const PlayerState = schema(
     lycheeGiven: t.uint8().default(0),
     /** 邪恶苹果头：身上的邪恶苹果剩余回合（0=没有） */
     appleTurns: t.uint8().default(0),
+    /** 屠夫：剔骨层数 */
+    boneStacks: t.uint8().default(0),
+    /** 被哪位屠夫封锁（''=未封锁） */
+    lockedBy: t.string().default(''),
+    /** 屠夫：对各目标的剩余冷却（sessionId -> 回合） */
+    butcherTargetCd: t.map('number'),
   },
   'PlayerState',
 );

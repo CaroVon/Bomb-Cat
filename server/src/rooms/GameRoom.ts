@@ -380,6 +380,13 @@ export class GameRoom extends Room<{ state: GameState }> {
         skillId: helpSkillId,
         targetSessionId: decision.targetSessionId,
       });
+    } else if (decision.kind === 'butcherCleave') {
+      // 屠夫：剔骨封锁
+      this.actAs(cur.sessionId, {
+        action: 'useSkill',
+        skillId: decision.skillId,
+        targetSessionId: decision.targetSessionId,
+      });
     } else if (decision.kind === 'appleEat') {
       // 邪恶苹果头：吃掉身上的苹果
       this.actAs(cur.sessionId, { action: 'appleEat', giveInstanceId: decision.giveInstanceId });
@@ -789,6 +796,11 @@ export class GameRoom extends Room<{ state: GameState }> {
         ps.lychees = ep.lychees;
         ps.lycheeGiven = ep.lycheeGivenThisTurn;
         ps.appleTurns = ep.appleTurns;
+        ps.boneStacks = ep.boneStacks;
+        ps.lockedBy = ep.lockedBy;
+        for (const [sid, cd] of Object.entries(ep.butcherTargetCd)) {
+          if (ps.butcherTargetCd.get(sid) !== cd) ps.butcherTargetCd.set(sid, cd);
+        }
         GameRoom.syncArray(ps.askedHelp, ep.askedHelp);
 
         // 技能冷却同步

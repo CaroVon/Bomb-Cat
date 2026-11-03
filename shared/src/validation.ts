@@ -246,6 +246,17 @@ export function validateSkill(skill: SkillDef, errors: string[]): boolean {
         return fail(errors, `${skill.id}: cooldownTurns 必须在 0-10`);
       }
       break;
+    case 'butcherCleave':
+      if ((effect.maxStacks ?? 0) < 1 || (effect.maxStacks ?? 0) > 10) {
+        return fail(errors, `${skill.id}: maxStacks 必须在 1-10`);
+      }
+      if ((effect.cost ?? 0) < 1 || (effect.cost ?? 0) > effect.maxStacks) {
+        return fail(errors, `${skill.id}: cost 必须在 1-maxStacks`);
+      }
+      if ((effect.targetCooldown ?? 0) < 0 || (effect.targetCooldown ?? 0) > 10) {
+        return fail(errors, `${skill.id}: targetCooldown 必须在 0-10`);
+      }
+      break;
     case 'pigGluttony':
       if ((effect.extraDraw ?? 0) < 1 || (effect.extraDraw ?? 0) > 2) {
         return fail(errors, `${skill.id}: extraDraw 必须在 1-2`);

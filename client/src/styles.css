@@ -1290,6 +1290,17 @@ select:focus {
   background: rgba(251, 113, 133, 0.08);
 }
 
+.seat-status-badge.is-bone {
+  color: #fca5a5;
+  border-color: rgba(127, 29, 29, 0.8);
+  background: rgba(94, 13, 2, 0.35);
+}
+.seat-status-badge.is-locked {
+  color: #fde68a;
+  border-color: rgba(253, 230, 138, 0.6);
+  background: rgba(94, 13, 2, 0.45);
+  animation: badge-pulse 1.6s ease-in-out infinite;
+}
 .seat-status-badge.is-apple {
   color: #f87171;
   border-color: rgba(248, 113, 113, 0.5);

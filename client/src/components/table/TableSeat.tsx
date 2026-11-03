@@ -26,6 +26,9 @@ export interface TableSeatData {
   lychees?: number;
   /** 邪恶苹果头：身上的邪恶苹果剩余回合 */
   appleTurns?: number;
+  /** 屠夫：剔骨层数 / 被哪位屠夫封锁 */
+  boneStacks?: number;
+  lockedBy?: string;
 }
 
 interface Props {
@@ -56,6 +59,8 @@ interface Props {
   freezeLayers?: number;
   lychees?: number;
   appleTurns?: number;
+  boneStacks?: number;
+  locked?: boolean;
 }
 
 /** 自计时倒计时角标（只在挂载期间 tick） */
@@ -95,6 +100,8 @@ function TableSeatInner({
   freezeLayers,
   lychees,
   appleTurns,
+  boneStacks,
+  locked,
 }: Props) {
   const char = BUILTIN_CHARACTER_MAP.get(seat.characterId);
   const rpg = CHARACTER_RPG[seat.characterId] ?? CHARACTER_RPG['none']!;
@@ -113,6 +120,8 @@ function TableSeatInner({
   const _freeze = freezeLayers ?? seat.freezeLayers ?? 0;
   const _lychees = lychees ?? seat.lychees ?? 0;
   const _apple = appleTurns ?? seat.appleTurns ?? 0;
+  const _bones = boneStacks ?? seat.boneStacks ?? 0;
+  const _locked = locked ?? !!seat.lockedBy;
 
   return (
     <div
@@ -190,6 +199,16 @@ function TableSeatInner({
               {_apple > 0 && (
                 <span className="seat-status-badge is-apple" title="身上有邪恶苹果：N 回合后变成爆炸苹果混入牌堆">
                   🍏{_apple}
+                </span>
+              )}
+              {seat.characterId === 'butcher' && _bones > 0 && (
+                <span className="seat-status-badge is-bone" title="剔骨层数（满 3 层可封锁一名玩家）">
+                  🔪{_bones}
+                </span>
+              )}
+              {_locked && (
+                <span className="seat-status-badge is-locked" title="被屠夫封锁：直到其下一回合结束前不能用技能和功能牌">
+                  🔒
                 </span>
               )}
             </>

@@ -133,7 +133,9 @@ export type SkillEffect =
   | { kind: 'iceLychee'; perTurn: number } // 秀英主动2：喂荔枝（解冻时可用）
   // ---- v4 新增原型（邪恶苹果头） ----
   | { kind: 'appleBomb'; count: number } // 被动：开局往牌堆插入 N 张爆炸苹果
-  | { kind: 'appleThrow'; cooldownTurns: number }; // 主动：投掷邪恶苹果（目标可在自己回合吃掉）
+  | { kind: 'appleThrow'; cooldownTurns: number } // 主动：投掷邪恶苹果（目标可在自己回合吃掉）
+  // ---- v5 新增原型（屠夫） ----
+  | { kind: 'butcherCleave'; maxStacks: number; cost: number; targetCooldown: number }; // 屠夫：剔骨层数 + 封锁抽牌（按目标冷却）
 
 export interface SkillDef {
   id: string;

@@ -128,6 +128,12 @@ export const CHARACTER_RPG: Record<string, CharacterRPG> = {
     difficulty: 1,
     lore: '参见女王大人。',
   },
+  butcher: {
+    role: 'aggressive',
+    themeColor: '#5e0d02',
+    difficulty: 3,
+    lore: '白天砍下来的牌，晚上放在口袋里嚼一嚼。',
+  },
 };
 
 /** 预置角色：每个角色由 1 个技能原型数据定义，引擎按原型结算。 */
@@ -473,6 +479,22 @@ export const BUILTIN_CHARACTERS: CharacterDef[] = [
         trigger: 'active',
         effect: { kind: 'appleThrow', cooldownTurns: 5 },
         cooldownTurns: 5,
+      },
+    ],
+  },
+  {
+    id: 'butcher',
+    name: '屠夫',
+    title: 'Butcher',
+    emoji: '🔪',
+    description: '被动：任何玩家的手牌被别人拿走时（每张）获得 1 层剔骨，最多 5 层。主动「剔骨」：消耗 3 层，随机抽走一名玩家 1 张手牌并封锁他直到其下一回合结束——期间他不能用角色主动技和功能牌（拆解除外），你对他的偷牌与攻击效果翻倍。对同一玩家冷却 5 回合。',
+    skills: [
+      {
+        id: 'butcher-skill',
+        name: '剔骨',
+        description: '被动：场内任何玩家的手牌被他人拿走时（自己出牌、交牌不算），每张 +1 层剔骨（上限 5）。主动：消耗 3 层，指定一名玩家——随机抽走他 1 张手牌（不计剔骨），并封锁他的主动技与功能牌（拆解除外）直到他的下一回合结束；封锁期间你对他的求赠/对子/三连偷 2 张，他是下家时你的攻击让他连续行动 4 回合（不与「乘」叠加）。对每名玩家冷却 5 回合，自己无冷却。',
+        trigger: 'active',
+        effect: { kind: 'butcherCleave', maxStacks: 5, cost: 3, targetCooldown: 5 },
       },
     ],
   },

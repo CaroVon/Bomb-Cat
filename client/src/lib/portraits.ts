@@ -8,6 +8,7 @@ const PORTRAIT_EXT: Record<string, string> = {
 /** 素材文件名与角色 id 不一致时的映射（文档里的素材名） */
 const PORTRAIT_FILE: Record<string, string> = {
   xiuying: 'ice',
+  butcher: 'butcher2',
 };
 
 export function portraitUrl(characterId: string | undefined | null): string {

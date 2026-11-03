@@ -228,7 +228,11 @@ export class GameEngine {
 
   private othersCanNope(playSessionId: string): boolean {
     return this.players.some(
-      (p) => p.alive && p.sessionId !== playSessionId && p.hand.some((c) => c.cardId === 'nope'),
+      (p) =>
+        p.alive &&
+        p.sessionId !== playSessionId &&
+        !this.isLocked(p) &&
+        p.hand.some((c) => c.cardId === 'nope'),
     );
   }
 
@@ -277,6 +281,9 @@ export class GameEngine {
       lycheeGivenThisTurn: 0,
       appleTurns: 0,
       appleFrom: '',
+      boneStacks: 0,
+      butcherTargetCd: {},
+      lockedBy: '',
     };
     this.players.push(player);
     if (!this.hostSessionId) this.hostSessionId = sessionId;
@@ -428,6 +435,9 @@ export class GameEngine {
       p.lycheeGivenThisTurn = 0;
       p.appleTurns = 0;
       p.appleFrom = '';
+      p.boneStacks = 0;
+      p.butcherTargetCd = {};
+      p.lockedBy = '';
 
       // Nana：开局没有拆解
       if (p.characterId === 'nana') {
@@ -581,6 +591,10 @@ export class GameEngine {
     // 秀英冰冻：无法出牌
     if (this.isFrozen(player)) {
       return this.invalid(sessionId, `冰冻中无法出牌（剩 ${player.freezeLayers} 层）`);
+    }
+    // 屠夫封锁：功能牌（含猫牌组合）全部不可用；拆解只在爆炸结算中使用，不经过这里
+    if (this.isLocked(player)) {
+      return this.invalid(sessionId, '你被屠夫封锁了，本回合不能使用功能牌 🔒');
     }
 
     const instance = player.hand.find((c) => c.iid === input.instanceId);
@@ -751,6 +765,18 @@ export class GameEngine {
       }
     }
 
+    // 屠夫压制：对被自己封锁的目标，偷牌效果翻倍（已被乘法加倍则不再叠加）
+    let suppressApplied = false;
+    if (!mulApplied && needsTarget && player.characterId === 'butcher') {
+      const t = this.players.find((p) => p.sessionId === effectiveTargetId);
+      if (t && t.lockedBy === sessionId && effects.some((e) => e.type === 'stealRandom' || e.type === 'stealNamed')) {
+        effects = effects.flatMap((e) =>
+          e.type === 'stealRandom' || e.type === 'stealNamed' ? [e, e] : [e],
+        );
+        suppressApplied = true;
+      }
+    }
+
     player.hand = player.hand.filter((c) => !instances.some((i) => i.iid === c.iid));
     if (player.mustPlayIid && instances.some((i) => i.iid === player.mustPlayIid)) {
       player.mustPlayIid = null;
@@ -764,6 +790,9 @@ export class GameEngine {
     this.log(events, `${player.name} 打出【${cardNames}】${targetName ? `→ ${targetName}` : ''}`);
     if (mulApplied) {
       this.log(events, `✖️ 乘法生效：【${cardNames}】的效果触发了两次`);
+    }
+    if (suppressApplied) {
+      this.log(events, `🔪 屠夫压制：【${cardNames}】对 ${targetName} 的偷牌效果翻倍`);
     }
     // 秀英冰冻：被功能牌指定 → 冰冻 -1（卡牌效果照常生效）
     if (needsTarget) {
@@ -816,6 +845,7 @@ export class GameEngine {
     if (pending.nopedBy[pending.nopedBy.length - 1] === sessionId) {
       return this.invalid(sessionId, '需要别人先否认，你才能再次否认');
     }
+    if (this.isLocked(player)) return this.invalid(sessionId, '你被屠夫封锁了，不能否认 🔒');
     const instance = player.hand.find((c) => c.iid === instanceId && c.cardId === 'nope');
     if (!instance) return this.invalid(sessionId, '你手中没有否认牌');
 
@@ -1020,6 +1050,7 @@ export class GameEngine {
         this.ev(events, { type: 'hand', sessionId: player.sessionId });
         this.log(events, `${player.name} 从 ${target.name} 那里偷走了 1 张牌 🤏`);
         objSteal(player, events);
+        this.onHandTakenByOther(target, 1, player.sessionId, events);
         this.chaosRipple(events);
         return 'ok';
       }
@@ -1242,6 +1273,27 @@ export class GameEngine {
     this.log(events, `🌀 涟漪：${cq.name} 感知到手牌变化，摸了 1 张牌`);
   }
 
+  /**
+   * 屠夫被动：有玩家的手牌被他人拿走 n 张 → 每位存活屠夫 +n 层剔骨（上限 maxStacks）。
+   * 拿牌者是屠夫本人时不计（屠夫自己的偷牌/剔骨抽牌不叠层）。
+   */
+  private onHandTakenByOther(victim: EnginePlayer, n: number, takerSid: string, events: EngineEvent[]): void {
+    if (this.phase !== 'playing' || n <= 0) return;
+    for (const b of this.players) {
+      if (!b.alive || b.characterId !== 'butcher' || b.sessionId === takerSid) continue;
+      const skill = this.activeSkillOf(b, 'butcher-skill');
+      const max = skill?.effect.kind === 'butcherCleave' ? skill.effect.maxStacks : 5;
+      if (b.boneStacks >= max) continue;
+      b.boneStacks = Math.min(max, b.boneStacks + n);
+      this.log(events, `🔪 ${victim.name} 失去了手牌，${b.name} 剔骨 +${n}（${b.boneStacks}/${max}）`);
+    }
+  }
+
+  /** 屠夫封锁：被封锁者不能使用主动技与功能牌（拆解除外），直到其下一回合结束 */
+  private isLocked(p: EnginePlayer): boolean {
+    return p.lockedBy !== '';
+  }
+
   /** 铁壁骑士：被偷免疫 */
   private tryImmuneSteal(target: EnginePlayer, events: EngineEvent[]): boolean {
     const skill = this.skillOf(target, 'onStolenFrom');
@@ -1369,6 +1421,7 @@ export class GameEngine {
       message: { action: 'chaosDraw', fromName: player.name, cardName: this.defOf(stolen).name },
     });
     this.log(events, `🌀 混沌之触：${player.name} 从 ${victim.name} 手中夺取了 1 张牌`);
+    this.onHandTakenByOther(victim, 1, player.sessionId, events);
     this.chaosRipple(events);
     return 'ok';
   }
@@ -1578,7 +1631,8 @@ export class GameEngine {
   }
 
   /** 沿出牌方向找下一个存活玩家 */
-  private nextAliveSessionId(): string | undefined {
+  /** 下家（按当前出牌方向）；AI 也用它判断攻击落点 */
+  nextAliveSessionId(): string | undefined {
     const n = this.turnOrder.length;
     for (let step = 1; step <= n; step++) {
       const idx = (this.turnIndex + this.direction * step + n * 2) % n;
@@ -1621,6 +1675,12 @@ export class GameEngine {
     }
     this.pendingEndDrawCount = 0;
 
+    // 屠夫封锁：被封锁者的（下一）回合结束 → 解除
+    if (current && current.lockedBy !== '') {
+      current.lockedBy = '';
+      this.log(events, `🔓 ${current.name} 的屠夫封锁解除了`);
+    }
+
     let transfer = 0;
     if (current) {
       current.turnsLeft--;
@@ -1629,7 +1689,7 @@ export class GameEngine {
     }
 
     const attack = this.pendingAttack;
-    const attackMult = this.pendingAttackMult;
+    let attackMult = this.pendingAttackMult;
     this.pendingAttack = false;
     this.pendingAttackMult = 1;
 
@@ -1638,13 +1698,19 @@ export class GameEngine {
       const victimId = this.nextAliveSessionId();
       const victim = this.players.find((p) => p.sessionId === victimId);
       if (victim && victim.alive) {
+        // 屠夫压制：下家被攻击者（屠夫）封锁 → 攻击翻倍（不与乘法叠加）
+        let suppressed = false;
+        if (attackMult === 1 && current && victim.lockedBy === current.sessionId) {
+          attackMult = 2;
+          suppressed = true;
+        }
         const base = (this.worldRuleId === 'overdrive' ? 4 : 2) * attackMult;
         victim.turnsLeft = transfer + base;
         this.turnIndex = this.turnOrder.indexOf(victim.sessionId);
         this.turnCount++;
         this.log(
           events,
-          `${victim.name} 被攻击，要连续行动 ${victim.turnsLeft} 个回合 ⚡${attackMult > 1 ? '（乘法加倍）' : ''}`,
+          `${victim.name} 被攻击，要连续行动 ${victim.turnsLeft} 个回合 ⚡${suppressed ? '（屠夫压制加倍）' : attackMult > 1 ? '（乘法加倍）' : ''}`,
         );
         // 秀英冰冻：被攻击也算"被打上技能牌"，冰冻 -1
         this.cardHitsFrozen(victim, '攻击', events);
@@ -1688,6 +1754,10 @@ export class GameEngine {
     // 冷却递减（所有技能的冷却在回合开始时-1）
     for (const [skillId, cd] of Object.entries(player.skillCooldowns)) {
       if (cd > 0) player.skillCooldowns[skillId] = cd - 1;
+    }
+    // 屠夫：按目标冷却（按屠夫自己的回合递减）
+    for (const [sid, cd] of Object.entries(player.butcherTargetCd)) {
+      if (cd > 0) player.butcherTargetCd[sid] = cd - 1;
     }
 
     // chaos_queen 混沌之触：激活者回合开始时关闭
@@ -1791,6 +1861,7 @@ export class GameEngine {
         this.ev(events, { type: 'hand', sessionId: next.sessionId });
         // 公开日志不泄露传的什么牌
         this.log(events, `🎁 ${player.name} 传了一张牌给 ${next.name}（是…才不告诉你）`);
+        this.onHandTakenByOther(player, 1, next.sessionId, events);
         this.chaosRipple(events);
       }
     }
@@ -1875,6 +1946,7 @@ export class GameEngine {
     const player = this.players.find((p) => p.sessionId === sessionId);
     if (!player || !player.alive) return this.invalid(sessionId, '你无法使用技能');
     if (this.current()?.sessionId !== sessionId) return this.invalid(sessionId, '还没轮到你');
+    if (this.isLocked(player)) return this.invalid(sessionId, '你被屠夫封锁了，不能使用角色技能 🔒');
 
     const skill = this.activeSkillOf(player, input.skillId);
     if (!skill) return this.invalid(sessionId, '你没有这个主动技能');
@@ -1892,7 +1964,8 @@ export class GameEngine {
       skill.effect.kind !== 'mathOp' &&
       skill.effect.kind !== 'iceHelp' &&
       skill.effect.kind !== 'iceLychee' &&
-      skill.effect.kind !== 'appleThrow'
+      skill.effect.kind !== 'appleThrow' &&
+      skill.effect.kind !== 'butcherCleave'
     ) {
       return this.invalid(sessionId, '该技能不是主动技能');
     }
@@ -1947,6 +2020,7 @@ export class GameEngine {
       this.ev(events, { type: 'hand', sessionId });
       // 公开日志不泄露卡名；当事人经私密消息得知
       this.log(events, `${player.name} 发动「${skill.name}」，偷走了 ${target.name} 的 1 张牌 🦹`);
+      this.onHandTakenByOther(target, 1, sessionId, events);
       this.ev(events, {
         type: 'private',
         sessionId: target.sessionId,
@@ -2136,6 +2210,45 @@ export class GameEngine {
       return events;
     }
 
+    if (skillEffect.kind === 'butcherCleave') {
+      // 屠夫：剔骨——消耗层数，随机抽目标 1 张牌（不计剔骨）并封锁到其下一回合结束
+      if (player.boneStacks < skillEffect.cost) {
+        return this.invalid(sessionId, `剔骨层数不足（${player.boneStacks}/${skillEffect.cost}）`);
+      }
+      const target = this.players.find((p) => p.sessionId === input.targetSessionId);
+      if (!target || !target.alive || target.sessionId === sessionId) {
+        return this.invalid(sessionId, '需要选择一名其他存活玩家');
+      }
+      const cd = player.butcherTargetCd[target.sessionId] ?? 0;
+      if (cd > 0) return this.invalid(sessionId, `对 ${target.name} 的剔骨冷却中（剩 ${cd} 回合）`);
+      player.boneStacks -= skillEffect.cost;
+      player.butcherTargetCd[target.sessionId] = skillEffect.targetCooldown;
+      // 冰冻（秀英）不受技能影响：层数与冷却照常消耗
+      if (this.frozenBlocksSkill(target, events, skill.name)) return events;
+
+      target.lockedBy = sessionId;
+      let stolenName = '';
+      if (target.hand.length > 0) {
+        const idx = Math.floor(this.rng() * target.hand.length);
+        const [stolen] = target.hand.splice(idx, 1);
+        player.hand.push(stolen!);
+        stolenName = this.defOf(stolen!).name;
+        this.ev(events, { type: 'hand', sessionId: target.sessionId });
+        this.ev(events, { type: 'hand', sessionId });
+        this.ev(events, {
+          type: 'private',
+          sessionId: target.sessionId,
+          message: { action: 'chaosDraw', fromName: player.name, cardName: stolenName },
+        });
+      }
+      this.log(
+        events,
+        `🔪 ${player.name} 发动「${skill.name}」：封锁了 ${target.name}（直到其下一回合结束）${stolenName ? '，并抽走 1 张手牌' : ''}`,
+      );
+      if (stolenName) this.chaosRipple(events);
+      return events;
+    }
+
     if (skillEffect.kind === 'pigGluttony') {
       // Pig King：吞噬（冷却制）
       const cd = player.skillCooldowns[skill.id] ?? 0;
@@ -2163,6 +2276,7 @@ export class GameEngine {
         events,
         `🐷 ${player.name} 吞噬了 ${target.name} 的一张牌，正在消化……（${skillEffect.digestTurns} 回合后可用）`,
       );
+      this.onHandTakenByOther(target, 1, sessionId, events);
       return events;
     }
 
@@ -2423,6 +2537,10 @@ export class GameEngine {
     if (!player || !player.alive) return this.invalid(sessionId, '你无法使用香蕉兑换');
     if (player.characterId !== 'banana') return this.invalid(sessionId, '只有香蕉女王能用香蕉兑换');
     if (this.bananaOverlayTurns <= 0) return this.invalid(sessionId, '大香蕉之怒未激活');
+    // 屠夫封锁：兑换功能牌不可用；兑换拆解（爆炸结算）照常
+    if (input.mode === 'action' && this.isLocked(player)) {
+      return this.invalid(sessionId, '你被屠夫封锁了，不能兑换功能牌 🔒');
+    }
 
     const costCount = input.mode === 'defuse' ? 4 : 2;
     const cost = input.costInstanceIds ?? [];
@@ -2794,6 +2912,7 @@ export class GameEngine {
     this.pendingExpose = null;
     const events: EngineEvent[] = [];
     this.ev(events, { type: 'hand', sessionId: target.sessionId });
+    this.onHandTakenByOther(target, 1, sessionId, events);
     if (pending.mode === 'discard') {
       this.discard.push(card!);
       this.log(events, `👀 ${player.name} 指定 ${target.name} 弃掉了一张牌`);

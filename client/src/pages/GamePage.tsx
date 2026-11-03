@@ -325,6 +325,11 @@ export default function GamePage() {
   const others = players.filter((p) => p.sessionId !== myId);
   const isMyTurn = currentId === myId && state.phase === 'playing';
   const canAct = isMyTurn && state.subPhase === 'awaiting-action' && me?.alive;
+  /** 屠夫封锁：不能使用主动技与功能牌（拆解除外） */
+  const myLocked = !!(me as any)?.lockedBy;
+  /** 屠夫：我对某目标的剩余剔骨冷却 */
+  const butcherCdOf = (sid: string): number =>
+    ((me as any)?.butcherTargetCd?.get?.(sid) ?? (me as any)?.butcherTargetCd?.[sid] ?? 0) as number;
 
   const myHand: HandCard[] = game.hand;
   const myChar = BUILTIN_CHARACTERS.find((c) => c.id === me?.characterId);
@@ -351,7 +356,7 @@ export default function GamePage() {
 
   const playable = useMemo(() => {
     const set = new Set<string>();
-    if (!canAct) return set;
+    if (!canAct || myLocked) return set;
     // 猪王：消化牌未处理时只能打那张牌
     const must = (me as any)?.mustPlayIid as string | undefined;
     if (must) {
@@ -380,7 +385,12 @@ export default function GamePage() {
   const myNope = myHand.find((c) => c.def.id === 'nope');
   const nopedBy = (state.nopeNopedBy?.toArray?.() ?? state.nopeNopedBy ?? []) as string[];
   const canNope =
-    state.nopeActive && !!myNope && state.nopePlayBy !== myId && nopedBy[nopedBy.length - 1] !== myId && me?.alive;
+    state.nopeActive &&
+    !!myNope &&
+    !myLocked &&
+    state.nopePlayBy !== myId &&
+    nopedBy[nopedBy.length - 1] !== myId &&
+    me?.alive;
 
   const fanCards: FanCard[] = myHand;
 
@@ -558,6 +568,8 @@ export default function GamePage() {
               freezeLayers={(p.freezeLayers as number) ?? 0}
               lychees={(p.lychees as number) ?? 0}
               appleTurns={(p.appleTurns as number) ?? 0}
+              boneStacks={(p.boneStacks as number) ?? 0}
+              locked={!!p.lockedBy}
             />
           );
         })}
@@ -622,6 +634,16 @@ export default function GamePage() {
             {!!me.appleTurns && me.appleTurns > 0 && (
               <span className="seat-status-badge is-apple" title="你身上有邪恶苹果：不吃掉的话会变成爆炸苹果混入牌堆">
                 🍏 邪恶苹果 ×{me.appleTurns}
+              </span>
+            )}
+            {me.characterId === 'butcher' && (
+              <span className="seat-status-badge is-bone" title="剔骨层数：他人手牌被拿走时每张 +1，满 3 层可发动剔骨">
+                🔪 剔骨 {(me as any).boneStacks ?? 0}/5
+              </span>
+            )}
+            {myLocked && (
+              <span className="seat-status-badge is-locked" title="被屠夫封锁：直到你的下一回合结束前，不能使用角色技能和功能牌（拆解除外）">
+                🔒 被封锁
               </span>
             )}
           </div>
@@ -843,7 +865,8 @@ export default function GamePage() {
                 kind === 'mathOp' ||
                 kind === 'iceHelp' ||
                 kind === 'iceLychee' ||
-                kind === 'appleThrow';
+                kind === 'appleThrow' ||
+                kind === 'butcherCleave';
               const eligibleTargets =
                 kind === 'bigEyeExpose'
                   ? others.filter((p) => p.alive && (p.archives ?? 0) >= 2)
@@ -857,9 +880,15 @@ export default function GamePage() {
                       )
                     : kind === 'appleThrow'
                       ? others.filter((p) => p.alive && ((p.appleTurns ?? 0) as number) === 0)
-                      : [];
+                      : kind === 'butcherCleave'
+                        ? others.filter((p) => p.alive && butcherCdOf(p.sessionId) <= 0)
+                        : [];
+              const boneCost = skill.effect.kind === 'butcherCleave' ? skill.effect.cost : 0;
+              const bones = ((me as any)?.boneStacks ?? 0) as number;
               const disabled =
+                myLocked ||
                 cd > 0 ||
+                (kind === 'butcherCleave' && (bones < boneCost || eligibleTargets.length === 0)) ||
                 (kind === 'bananaRage' && (usesLeft <= 0 || bananaOverlay)) ||
                 (kind === 'pigGluttony' && !!(me as any)?.digestion) ||
                 (kind === 'bigEyeExpose' && eligibleTargets.length === 0) ||
@@ -867,8 +896,13 @@ export default function GamePage() {
                 (kind === 'iceHelp' && (!myFrozenNow || eligibleTargets.length === 0)) ||
                 (kind === 'iceLychee' && (myFrozenNow || !!me?.lycheeGiven)) ||
                 (kind === 'appleThrow' && eligibleTargets.length === 0);
-              const title =
-                kind === 'bananaRage' && bananaOverlay
+              const title = myLocked
+                ? '你被屠夫封锁了，不能使用角色技能'
+                : kind === 'butcherCleave' && bones < boneCost
+                  ? `剔骨层数不足（${bones}/${boneCost}）`
+                  : kind === 'butcherCleave' && eligibleTargets.length === 0
+                    ? '所有玩家都在剔骨冷却中'
+                    : kind === 'bananaRage' && bananaOverlay
                   ? '大香蕉之怒正在生效，无法再次发动'
                   : kind === 'iceHelp' && !myFrozenNow
                     ? '只有冰冻中才能求助'
@@ -893,13 +927,13 @@ export default function GamePage() {
                 >
                   {skill.name}
                   {cd > 0 && <span className="skill-cooldown">CD{cd}</span>}
-                  {usesLeft > 0 && ` ×${usesLeft}`}
+                  {kind === 'butcherCleave' ? ` 🔪${bones}/${boneCost}` : usesLeft > 0 && ` ×${usesLeft}`}
                 </button>
               );
             })}
 
         {/* 旧版主动技（有代价流程的） */}
-        {canAct && activeSkill && skillUsesLeft > 0 && (
+        {canAct && !myLocked && activeSkill && skillUsesLeft > 0 && (
           <button className="action-skill" onClick={() => setSkillOpen(true)}>
             {myChar!.emoji} {activeSkill.name} ×{skillUsesLeft}
           </button>
@@ -1230,6 +1264,8 @@ export default function GamePage() {
               (p) =>
                 p.alive &&
                 (skillTargetPicker !== 'bigeye-expose' || (p.archives ?? 0) >= 2) &&
+                // 屠夫剔骨：冷却中的目标不列出
+                !(skillTargetPicker === 'butcher-skill' && butcherCdOf(p.sessionId) > 0) &&
                 // 秀英求助：本回合问过的玩家不再列出
                 !(
                   activeSkills.find((s) => s.id === skillTargetPicker)?.effect.kind === 'iceHelp' &&
@@ -1259,7 +1295,8 @@ export default function GamePage() {
                 }}
               >
                 {p.name}（{p.handCount} 张
-                {skillTargetPicker === 'bigeye-expose' ? ` · 👁档案 ${p.archives ?? 0}` : ''}）
+                {skillTargetPicker === 'bigeye-expose' ? ` · 👁档案 ${p.archives ?? 0}` : ''}
+                {skillTargetPicker === 'butcher-skill' && (p.freezeLayers ?? 0) > 0 ? ' · ❄️冰冻免疫' : ''}）
               </button>
             ))}
           {skillTargetPicker === 'bigeye-expose' &&

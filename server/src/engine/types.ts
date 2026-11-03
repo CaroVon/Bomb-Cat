@@ -76,6 +76,13 @@ export interface EnginePlayer {
   appleTurns: number;
   /** 苹果是谁投的（吃苹果时把手牌交给他） */
   appleFrom: string;
+  /* ---- v5：屠夫 ---- */
+  /** 屠夫剔骨层数（仅屠夫本人有意义） */
+  boneStacks: number;
+  /** 屠夫对各目标的剩余冷却（按屠夫自己的回合递减） */
+  butcherTargetCd: Record<string, number>;
+  /** 被哪位屠夫封锁（'' = 未封锁）；持续到被封锁者的下一回合结束 */
+  lockedBy: string;
 }
 
 export type SubPhase =

@@ -52,14 +52,14 @@ $serverLog = Join-Path $env:TEMP "bombcat-server.log"
 # npm 是 npm.cmd，Start-Process 直接重定向它不行，须用 cmd /c 包装
 Start-Process cmd.exe -ArgumentList '/c', 'npm', 'run', 'dev:server' -WorkingDirectory $root `
   -RedirectStandardOutput $serverLog -RedirectStandardError "$serverLog.err" -WindowStyle Hidden
-# 等 :2567 真正就绪（最多 40s），而不是固定睡 6 秒
-$deadline = (Get-Date).AddSeconds(40)
+# 等 :2567 真正就绪（最多 90s），而不是固定睡 6 秒
+$deadline = (Get-Date).AddSeconds(90)
 while ((Get-Date) -lt $deadline) {
   if (Get-NetTCPConnection -LocalPort 2567 -State Listen -ErrorAction SilentlyContinue) { break }
   Start-Sleep -Milliseconds 500
 }
 if (-not (Get-NetTCPConnection -LocalPort 2567 -State Listen -ErrorAction SilentlyContinue)) {
-  Write-Host "后端 40s 内未监听 :2567，日志尾部:"
+  Write-Host "后端 90s 内未监听 :2567，日志尾部:"
   Get-Content $serverLog -Tail 15 -ErrorAction SilentlyContinue
   Get-Content "$serverLog.err" -Tail 15 -ErrorAction SilentlyContinue
   throw "后端启动失败"
