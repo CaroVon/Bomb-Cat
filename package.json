@@ -16,7 +16,8 @@
     "test": "npm run test -w @bombcat/shared && npm run test -w @bombcat/server",
     "typecheck": "npm run typecheck -w @bombcat/shared && npm run typecheck -w @bombcat/server && npm run typecheck -w @bombcat/client",
     "gen-assets": "node scripts/gen-assets/generate.cjs",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "start": "npm run start -w @bombcat/server"
   },
   "devDependencies": {
     "@colyseus/sdk": "^0.18.2",
@@ -28,5 +29,8 @@
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

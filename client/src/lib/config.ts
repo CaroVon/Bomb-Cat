@@ -1,10 +1,17 @@
 /** 环境配置：.env.local 可覆盖（VITE_ 前缀）；静态托管（Cloudflare Pages）可用运行时 /config.json 覆盖 */
-const fallbackGameUrl = (): string =>
-  import.meta.env.VITE_GAME_URL ?? `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:2567`;
+const fallbackGameUrl = (): string => {
+  const env = import.meta.env.VITE_GAME_URL as string | undefined;
+  if (env) return env;
+  const ws = location.protocol === 'https:' ? 'wss' : 'ws';
+  // 本地开发/预览：前端在 vite :5173，游戏服务器在同主机 :2567
+  if (import.meta.env.DEV || location.port === '5173') return `${ws}://${location.hostname}:2567`;
+  // 单服务部署（Railway）：前端由游戏服务器自己提供 → 同源
+  return `${ws}://${location.host}`;
+};
 
 /**
  * 游戏服务器地址（live binding：loadRuntimeConfig 之后各模块读到的是新值）。
- * 优先级：/config.json 的 gameUrl > VITE_GAME_URL > 按页面主机名推导 ws://host:2567
+ * 优先级：/config.json 的 gameUrl > VITE_GAME_URL > 本地 ws://host:2567 / 线上同源
  */
 export let GAME_SERVER_URL: string = fallbackGameUrl();
 
