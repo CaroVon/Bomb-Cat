@@ -71,7 +71,7 @@ export default function RoomPage() {
   const botsToFill = Math.max(0, Math.min(fillTo, MAX_PLAYERS) - players.length);
 
   return (
-    <div className="page">
+    <div className="page page-room">
       <div className="h-row" style={{ marginBottom: 16 }}>
         <span className="title">等待室</span>
         <span className="tag">{players.length}/{MAX_PLAYERS} 人</span>

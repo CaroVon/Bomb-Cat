@@ -241,60 +241,22 @@ function TableSeatInner({
 export const TableSeat = memo(TableSeatInner);
 
 /**
- * 根据对手数量计算椭圆桌面上的座位分布位置。
- * 自己固定在底部中央（手牌区上方），对手围绕上方半圆分布。
- * 顶行/次行用固定像素（不随屏幕高度缩水导致头像裁切），侧下行用百分比。
+ * 对手座位：沿桌面上半椭圆弧均匀分布（自己在底部，不占座位）。
+ * 坐标相对 .table-opponents（覆盖顶栏以下、我的区域以上的整块桌面）：
+ * - 横向 50% ± 43%·cosθ；纵向 = 顶部留白 104px（避开顶栏） + (1 - sinθ)·46%
+ * - 人越多张角越大（最多 20°~160°），两人时也不会挤在正中间
+ * 手机端由 CSS 改为顶部横向头像条，这里的坐标会被覆盖。
  */
 export function getSeatPositions(opponentCount: number): Array<{ top?: string; left?: string; right?: string }> {
-  switch (opponentCount) {
-    case 1:
-      return [{ top: '84px', left: '50%' }];
-    case 2:
-      return [
-        { top: '84px', left: '26%' },
-        { top: '84px', left: '74%' },
-      ];
-    case 3:
-      return [
-        { top: '26%', left: '12%' },
-        { top: '84px', left: '50%' },
-        { top: '26%', left: '88%' },
-      ];
-    case 4:
-      return [
-        { top: '36%', left: '9%' },
-        { top: '84px', left: '30%' },
-        { top: '84px', left: '70%' },
-        { top: '36%', left: '91%' },
-      ];
-    case 5:
-      return [
-        { top: '40%', left: '8%' },
-        { top: '84px', left: '20%' },
-        { top: '84px', left: '50%' },
-        { top: '84px', left: '80%' },
-        { top: '40%', left: '92%' },
-      ];
-    case 6:
-      return [
-        { top: '44%', left: '8%' },
-        { top: '30%', left: '14%' },
-        { top: '84px', left: '34%' },
-        { top: '84px', left: '66%' },
-        { top: '30%', left: '86%' },
-        { top: '44%', left: '92%' },
-      ];
-    case 7:
-    default:
-      // 7 对手（最大值）：右上方给日志按钮留空间
-      return [
-        { top: '48%', left: '8%' },
-        { top: '32%', left: '12%' },
-        { top: '84px', left: '26%' },
-        { top: '84px', left: '50%' },
-        { top: '84px', left: '70%' },
-        { top: '32%', left: '84%' },
-        { top: '48%', left: '90%' },
-      ];
-  }
+  const n = Math.max(1, opponentCount);
+  if (n === 1) return [{ top: '104px', left: '50%' }];
+  const span = Math.min(140, 36 * (n - 1));
+  const start = 90 + span / 2;
+  return Array.from({ length: n }, (_, i) => {
+    const deg = start - (span * i) / (n - 1);
+    const rad = (deg * Math.PI) / 180;
+    const left = 50 + 43 * Math.cos(rad);
+    const drop = (1 - Math.sin(rad)) * 46;
+    return { top: `calc(104px + ${drop.toFixed(2)}%)`, left: `${left.toFixed(2)}%` };
+  });
 }

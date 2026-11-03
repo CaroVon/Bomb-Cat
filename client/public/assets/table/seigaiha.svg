@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <!-- 青海波：逐行叠放的同心圆鳞纹（后画的一行遮住上一行下半部），墨底 + 暗金细线 -->
+  <defs>
+    <g id="s">
+      <circle r="24" fill="#18110d"/>
+      <g fill="none" stroke="#c6a14a" stroke-opacity="0.2" stroke-width="1">
+        <circle r="23"/>
+        <circle r="17.5"/>
+        <circle r="12"/>
+        <circle r="6.5"/>
+      </g>
+    </g>
+  </defs>
+  <rect width="48" height="48" fill="#18110d"/>
+  <use href="#s" x="0" y="0"/>
+  <use href="#s" x="48" y="0"/>
+  <use href="#s" x="24" y="24"/>
+  <use href="#s" x="0" y="48"/>
+  <use href="#s" x="48" y="48"/>
+</svg>

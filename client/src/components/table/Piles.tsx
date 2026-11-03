@@ -31,7 +31,8 @@ export function DrawPile({ count }: { count: number }) {
   return (
     <div className="pile-wrap">
       <div className="pile draw-pile" title={`牌堆剩余 ${count} 张`}>
-        {Array.from({ length: layers }).map((_, i) => (
+        {count === 0 && <div className="pile-slot">空</div>}
+        {count > 0 && Array.from({ length: layers }).map((_, i) => (
           <div
             key={i}
             className="pcard pcard-back mini pile-layer"
@@ -75,6 +76,7 @@ export function DiscardPile({
   return (
     <div className="pile-wrap">
       <div className="pile discard-pile" title={`弃牌堆共 ${total} 张`}>
+        {scattered.length === 0 && <div className="pile-slot">捨</div>}
         <AnimatePresence initial={false}>
           {scattered.map((c) => (
             <motion.div

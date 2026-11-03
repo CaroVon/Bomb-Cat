@@ -22,7 +22,7 @@ export default function App() {
     <>
       {!isGamePage && (
         <nav
-          className="h-row"
+          className="h-row app-nav"
           style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)' }}
         >
           <Link to="/lobby" style={{ textDecoration: 'none', color: 'var(--gold)', fontWeight: 800 }}>

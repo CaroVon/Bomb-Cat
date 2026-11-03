@@ -703,56 +703,10 @@ select:focus {
   font-weight: 700;
 }
 
-.seat-v2 {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 12px 7px 7px;
-  border-radius: 999px;
-  background: rgba(13, 16, 14, 0.72);
-  border: 1px solid var(--border);
-  transition: all 0.25s ease;
-}
-
-.seat-v2.is-current {
-  border-color: var(--gold);
-  box-shadow: 0 0 0 1px var(--gold), 0 0 22px var(--gold-soft);
-  animation: seat-breathe 1.8s ease-in-out infinite;
-}
-
-@keyframes seat-breathe {
-  0%, 100% { box-shadow: 0 0 0 1px var(--gold), 0 0 14px var(--gold-soft); }
-  50% { box-shadow: 0 0 0 1px var(--gold), 0 0 26px var(--gold-soft); }
-}
-
-.seat-v2.is-dead {
-  opacity: 0.45;
-  filter: grayscale(0.9);
-}
-
-.seat-v2.is-bounced .seat-avatar {
-  animation: seat-bounce 0.3s ease-out;
-}
-
 @keyframes seat-bounce {
   0% { transform: scale(1); }
   40% { transform: scale(1.12); }
   100% { transform: scale(1); }
-}
-
-.seat-avatar {
-  position: relative;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background-color: #171d18;
-  background-image: var(--avatar, radial-gradient(circle at 35% 30%, #2e3830, #171d18));
-  background-size: cover;
-  background-position: center;
-  border: 2px solid #37423a;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 /* 房间等待室玩家列表小头像 */
@@ -768,11 +722,6 @@ select:focus {
   flex-shrink: 0;
 }
 
-.seat-emoji {
-  font-size: 24px;
-  line-height: 1;
-}
-
 .seat-skull {
   position: absolute;
   inset: 0;
@@ -784,44 +733,11 @@ select:focus {
   border-radius: 50%;
 }
 
-.seat-marker {
-  position: absolute;
-  top: -14px;
-  left: 50%;
-  transform: translateX(-50%);
-  color: var(--gold);
-  font-size: 13px;
-  animation: marker-float 1.4s ease-in-out infinite;
-  text-shadow: 0 0 8px var(--gold-soft);
-}
-
-@keyframes marker-float {
-  0%, 100% { transform: translate(-50%, 0); }
-  50% { transform: translate(-50%, 5px); }
-}
-
 .seat-meta {
   display: flex;
   flex-direction: column;
   gap: 1px;
   min-width: 64px;
-}
-
-.seat-name {
-  font-size: 13px;
-  font-weight: 700;
-  max-width: 90px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.seat-sub {
-  font-size: 11px;
-  color: var(--text-dim);
-  display: flex;
-  gap: 6px;
-  align-items: center;
 }
 
 .seat-combo {
@@ -1502,9 +1418,7 @@ select:focus {
 @media (prefers-reduced-motion: reduce) {
   .table-root.is-shaking,
   .pcard.is-glow::before,
-  .seat-v2.is-current,
-  .action-nope,
-  .seat-marker {
+  .action-nope {
     animation: none !important;
   }
 }
@@ -1724,34 +1638,6 @@ button,
   .pile {
     width: 48px;
     height: 68px;
-  }
-
-  .opponents-row {
-    gap: 6px;
-    padding: 8px 8px 4px;
-  }
-
-  .seat-v2 {
-    padding: 5px 8px 5px 5px;
-    gap: 7px;
-  }
-
-  .seat-avatar {
-    width: 34px;
-    height: 34px;
-  }
-
-  .seat-emoji {
-    font-size: 18px;
-  }
-
-  .seat-name {
-    font-size: 11px;
-    max-width: 56px;
-  }
-
-  .seat-sub {
-    font-size: 10px;
   }
 
   /* 状态与行动条 */

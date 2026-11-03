@@ -10,6 +10,7 @@ import EditorPage from './pages/EditorPage';
 import { unlockAudio } from './lib/sound';
 import { loadRuntimeConfig } from './lib/config';
 import './styles.css';
+import './theme.css';
 
 // 浏览器音频策略：首次用户手势解锁 AudioContext（一次即可）
 window.addEventListener('pointerdown', unlockAudio, { once: true });

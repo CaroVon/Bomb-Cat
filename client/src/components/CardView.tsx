@@ -9,10 +9,11 @@ export function setSkinMap(map: Record<string, string>): void {
 }
 
 const KIND_FRAME: Record<string, string> = {
-  exploding: 'linear-gradient(160deg,#7f1d1d,#ef4444 45%,#7f1d1d)',
-  defuse: 'linear-gradient(160deg,#14532d,#22c55e 45%,#14532d)',
-  action: 'linear-gradient(160deg,#1e3a5f,#4a90c2 45%,#1e3a5f)',
-  plain: 'linear-gradient(160deg,#4a3f1e,#c9a54e 45%,#4a3f1e)',
+  // 浮世绘配色：朱（爆炸）/ 松（拆解）/ 藍（功能）/ 金（普通猫）
+  exploding: 'linear-gradient(160deg,#5c1410,#c03028 45%,#5c1410)',
+  defuse: 'linear-gradient(160deg,#1e2e1c,#5f8a52 45%,#1e2e1c)',
+  action: 'linear-gradient(160deg,#142a46,#3f6fa8 45%,#142a46)',
+  plain: 'linear-gradient(160deg,#4a3a18,#c6a14a 45%,#4a3a18)',
 };
 
 /** 香蕉覆盖期间统一边框：不按真实牌种着色，杜绝"看边框猜牌" */

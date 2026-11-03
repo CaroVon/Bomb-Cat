@@ -1,0 +1,1041 @@
+/* ==========================================================================
+   浮世绘茶室风主题层（在 styles.css 之后加载，覆盖其视觉与牌桌布局）
+   色板取自卡背 card-back.svg：墨 / 漆 / 朱 / 金 / 和纸 / 藍 / 松
+   ========================================================================== */
+
+:root {
+  --sumi: #120e0b;
+  --urushi: #2b1610;
+  --shu: #c03028;
+  --shu-deep: #8e1f18;
+  --kin: #c6a14a;
+  --kin-soft: rgba(198, 161, 74, 0.32);
+  --kin-line: rgba(198, 161, 74, 0.28);
+  --washi: #f1e6cc;
+  --ai: #254b7a;
+  --matsu: #3f5a3a;
+  --serif: 'Noto Serif SC', 'Source Han Serif SC', 'Source Han Serif', 'Songti SC', 'STSong', 'SimSun', serif;
+
+  /* 旧变量改指向新色（未改到的组件也随之换色） */
+  --bg: var(--sumi);
+  --bg-panel: #1a1511;
+  --bg-card: #241c16;
+  --border: #3a2e22;
+  --text: #efe6d2;
+  --text-dim: #a39885;
+  --gold: var(--kin);
+  --gold-soft: var(--kin-soft);
+  --accent: var(--kin);
+  --danger: #d0453a;
+  --ok: #6f9a5f;
+  --radius: 8px;
+
+  /* 牌桌尺寸 */
+  --hand-w: 124px;
+  --pile-w: 84px;
+  --stage-w: 168px;
+  --myzone-h: calc(var(--hand-w) * 1.4 + 76px);
+}
+
+/* ---------------- 通用：字体 / 按钮 / 输入 / 标签 / 面板 ---------------- */
+
+.title,
+h1,
+h2,
+h3,
+h4,
+.detail-name,
+.char-name,
+.turn-banner,
+.status-turn,
+.table-seat-name,
+.my-char-name,
+.pile-label,
+.room-code-big {
+  font-family: var(--serif);
+}
+
+.title {
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: 4px;
+  color: var(--washi);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+}
+
+button {
+  border-radius: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+}
+
+button.primary {
+  background: linear-gradient(180deg, #d2453a 0%, var(--shu) 45%, var(--shu-deep) 100%);
+  color: var(--washi);
+  border: 1px solid rgba(198, 161, 74, 0.65);
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 3px 0 #4e110c,
+    0 6px 16px rgba(0, 0, 0, 0.4);
+}
+
+button.primary:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 1px 0 #4e110c,
+    0 3px 8px rgba(0, 0, 0, 0.4);
+}
+
+button.danger {
+  background: var(--shu-deep);
+  color: var(--washi);
+}
+
+input,
+select {
+  border-radius: 6px;
+  background: rgba(18, 14, 11, 0.85);
+  border-color: var(--border);
+}
+
+input:focus,
+select:focus {
+  border-color: var(--kin);
+  box-shadow: 0 0 0 3px rgba(198, 161, 74, 0.18);
+}
+
+.tag {
+  border-radius: 4px;
+  border-color: var(--kin-line);
+  background: rgba(18, 14, 11, 0.6);
+  color: var(--text-dim);
+}
+
+/* 和纸卡面板：墨底 + 内侧细金线 */
+.panel,
+.page-login .panel,
+.page-lobby .panel,
+.page-room .panel {
+  background:
+    linear-gradient(180deg, rgba(255, 244, 220, 0.035), transparent 40%),
+    rgba(22, 17, 13, 0.84);
+  border: 1px solid var(--kin-line);
+  border-radius: var(--radius);
+  box-shadow:
+    inset 0 0 0 4px rgba(18, 14, 11, 0.55),
+    inset 0 0 0 5px rgba(198, 161, 74, 0.12),
+    0 10px 30px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.panel h3,
+.panel h4 {
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: var(--washi);
+}
+
+/* 印章：朱底反白小方章 */
+.seal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--shu);
+  color: var(--washi);
+  font-family: var(--serif);
+  font-weight: 900;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 2px rgba(241, 230, 204, 0.55);
+}
+
+/* ---------------- 顶部导航 ---------------- */
+
+.app-nav {
+  background: linear-gradient(180deg, rgba(18, 14, 11, 0.96), rgba(18, 14, 11, 0.82));
+  border-bottom: 1px solid var(--kin-line) !important;
+  position: relative;
+  z-index: 10;
+}
+
+.app-nav a:first-child {
+  font-family: var(--serif);
+  letter-spacing: 2px;
+  font-size: 17px;
+}
+
+/* ---------------- 登录 / 大厅 / 等待室：全屏背景 ---------------- */
+
+.page-login,
+.page-lobby,
+.page-room {
+  max-width: none;
+  padding-inline: max(20px, calc((100% - 1080px) / 2));
+  background-attachment: fixed;
+}
+
+.page-login {
+  background-image:
+    radial-gradient(ellipse at 50% 40%, rgba(18, 14, 11, 0.1), rgba(18, 14, 11, 0.75) 80%),
+    linear-gradient(180deg, rgba(18, 14, 11, 0.35), rgba(18, 14, 11, 0.7)),
+    url(/assets/lobby/login-bg.jpg);
+}
+
+.page-lobby {
+  background-image:
+    linear-gradient(180deg, rgba(18, 14, 11, 0.62), rgba(18, 14, 11, 0.9)),
+    url(/assets/lobby/lobby-bg.jpg);
+}
+
+.page-room {
+  background-image:
+    linear-gradient(180deg, rgba(18, 14, 11, 0.7), rgba(18, 14, 11, 0.92)),
+    url(/assets/lobby/room-bg.jpg);
+}
+
+.page-login .auth-box {
+  margin-top: 12vh;
+}
+
+/* 大厅三张入口卡等高、按钮贴底 */
+.lobby-grid > .panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.lobby-grid > .panel > :last-child {
+  margin-top: auto;
+}
+
+/* 房间码：大号朱印 */
+.room-code-big {
+  display: block;
+  width: fit-content;
+  margin: 12px auto 4px;
+  padding: 6px 26px 8px;
+  font-size: 46px;
+  font-weight: 900;
+  letter-spacing: 14px;
+  text-indent: 14px;
+  color: var(--washi);
+  background: var(--shu);
+  border-radius: 6px;
+  box-shadow:
+    inset 0 0 0 3px var(--shu),
+    inset 0 0 0 5px rgba(241, 230, 204, 0.7),
+    0 8px 24px rgba(192, 48, 40, 0.3);
+  rotate: -1.5deg;
+}
+
+/* 角色选择：手机端改上下排列，详情不再被挤成竖排 */
+.char-select {
+  border-radius: var(--radius);
+}
+
+.char-select-card {
+  border-radius: 10px;
+}
+
+.char-select-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+}
+
+.char-mini {
+  width: auto;
+  border-radius: 6px;
+}
+
+.char-confirm.is-locked {
+  background: linear-gradient(180deg, #d2453a, var(--shu-deep));
+  color: var(--washi);
+}
+
+@media (max-width: 640px) {
+  .char-select {
+    padding: 14px;
+  }
+
+  .char-select-main {
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .char-select-card {
+    width: 160px;
+  }
+
+  .char-select-detail {
+    width: 100%;
+  }
+
+  .room-code-big {
+    font-size: 36px;
+    letter-spacing: 10px;
+    text-indent: 10px;
+  }
+}
+
+/* ---------------- 弹窗：和纸卷轴 ---------------- */
+
+.overlay {
+  background: rgba(8, 6, 4, 0.7);
+}
+
+.modal {
+  background:
+    linear-gradient(180deg, rgba(255, 244, 220, 0.04), transparent 30%),
+    linear-gradient(180deg, #221a14, #16110d);
+  border: 1px solid rgba(198, 161, 74, 0.45);
+  border-radius: 8px;
+  box-shadow:
+    inset 0 0 0 5px #17120e,
+    inset 0 0 0 6px rgba(198, 161, 74, 0.2),
+    0 24px 60px rgba(0, 0, 0, 0.6);
+}
+
+.modal h3 {
+  font-family: var(--serif);
+  letter-spacing: 3px;
+  color: var(--washi);
+}
+
+/* ==========================================================================
+   卡牌
+   ========================================================================== */
+
+.pcard {
+  border-radius: 8px;
+}
+
+.pcard-face {
+  border-radius: 6px;
+}
+
+.pcard-name {
+  font-family: var(--serif);
+  letter-spacing: 1px;
+}
+
+.pcard.hand {
+  width: var(--hand-w);
+}
+
+.pcard.stage {
+  width: var(--stage-w);
+}
+
+/* 可打出：金光；选中：朱色描边 */
+.pcard.is-glow {
+  box-shadow:
+    0 0 0 2px var(--kin),
+    0 0 16px var(--kin-soft),
+    var(--shadow-1);
+}
+
+.pcard.is-selected {
+  box-shadow:
+    0 0 0 3px var(--shu),
+    0 0 0 5px rgba(241, 230, 204, 0.5),
+    0 0 26px rgba(192, 48, 40, 0.6),
+    var(--shadow-2);
+}
+
+/* 卡背：让 card-back.svg 显示出来（原先被不透明渐变层盖住） */
+.pcard.pcard-back::before {
+  background: url(/assets/cards/back/card-back.svg) center / cover no-repeat, #e8d8a8;
+  border-color: var(--kin);
+  border-radius: 7px;
+}
+
+/* ==========================================================================
+   牌桌：CSS grid 布局
+   顶栏 / 中央漆盘 / 我的区域（立绘 · 手牌 · 操作）
+   ========================================================================== */
+
+.table-root {
+  height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(170px, 230px) minmax(0, 1fr) minmax(220px, 290px);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'top top top'
+    'center center center'
+    'me hand act';
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 45%, rgba(255, 214, 150, 0.08), transparent 70%),
+    linear-gradient(180deg, rgba(18, 14, 11, 0.2), rgba(8, 6, 4, 0.75)),
+    url(/assets/table/seigaiha.svg) repeat,
+    #18110d;
+  background-size: auto, auto, 48px 48px, auto;
+}
+
+.table-root::after {
+  background: radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.6) 100%);
+}
+
+.statusline {
+  grid-area: top;
+}
+
+.table-center-v2 {
+  grid-area: center;
+}
+
+.my-char-badge {
+  grid-area: me;
+}
+
+.handzone {
+  grid-area: hand;
+}
+
+.actionbar {
+  grid-area: act;
+}
+
+/* 绝对定位的浮层不参与网格 */
+.chaos-active-indicator {
+  position: absolute !important;
+  top: 52px;
+  left: 50%;
+  translate: -50%;
+  z-index: 40 !important;
+}
+
+/* ---------------- 顶栏 ---------------- */
+
+.statusline {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 112px 10px 16px;
+  min-height: 48px;
+  background: linear-gradient(180deg, rgba(10, 8, 6, 0.8), rgba(10, 8, 6, 0));
+  z-index: 30;
+}
+
+.statusline .rule-chip,
+.statusline .obj-chip {
+  border-radius: 4px;
+  font-family: var(--serif);
+  letter-spacing: 1px;
+}
+
+.status-turn {
+  font-size: 15px;
+  letter-spacing: 2px;
+  padding: 3px 12px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+}
+
+.status-turn.is-mine {
+  color: var(--washi);
+  background: var(--shu);
+  box-shadow: inset 0 0 0 2px rgba(241, 230, 204, 0.5), 0 0 18px rgba(192, 48, 40, 0.45);
+  text-shadow: none;
+}
+
+.status-deck,
+.status-dir,
+.status-me {
+  font-size: 12px;
+}
+
+/* ---------------- 对手座位：桌面上半弧 ---------------- */
+
+.table-opponents {
+  inset: 0 0 var(--myzone-h) 0;
+}
+
+.table-seat {
+  min-width: 92px;
+}
+
+.table-seat-portrait {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  border-width: 3px;
+  box-shadow:
+    0 0 0 3px rgba(18, 14, 11, 0.9),
+    0 0 0 4px var(--kin-line),
+    0 6px 16px rgba(0, 0, 0, 0.5);
+}
+
+.table-seat-img,
+.table-seat-dead-overlay {
+  border-radius: 50%;
+}
+
+.table-seat-turn-glow {
+  border-radius: 50%;
+  inset: -7px;
+  border-color: var(--kin);
+}
+
+.table-seat.is-current .table-seat-portrait {
+  animation: seat-current-breathe 1.8s ease-in-out infinite;
+}
+
+.table-seat-info {
+  background: rgba(18, 14, 11, 0.88);
+  border: 1px solid var(--kin-line);
+  border-radius: 4px;
+  padding: 3px 10px 4px;
+}
+
+.table-seat.is-current .table-seat-info {
+  border-color: var(--kin);
+}
+
+.table-seat-name {
+  font-size: 14px;
+  letter-spacing: 1px;
+}
+
+.table-seat-timer {
+  border-radius: 4px;
+  background: var(--sumi);
+  border-color: var(--kin-line);
+}
+
+/* ---------------- 中央漆盘 ---------------- */
+
+.table-center-v2 {
+  position: relative;
+  padding-top: 132px;
+  gap: clamp(24px, 5vw, 80px);
+}
+
+.table-center-v2::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 66px);
+  width: min(66%, 900px);
+  height: min(calc(100% - 150px), 420px);
+  translate: -50% -50%;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at 50% 30%, rgba(255, 200, 150, 0.1), transparent 60%),
+    radial-gradient(ellipse at 50% 50%, #3a1a12 0%, #24100b 55%, #150906 100%);
+  box-shadow:
+    inset 0 0 0 2px rgba(198, 161, 74, 0.55),
+    inset 0 0 0 7px rgba(21, 9, 6, 0.9),
+    inset 0 0 0 8px rgba(198, 161, 74, 0.22),
+    inset 0 18px 50px rgba(0, 0, 0, 0.55),
+    0 24px 60px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+
+.table-center-v2 > * {
+  position: relative;
+  z-index: 1;
+}
+
+.stage {
+  max-width: 420px;
+  min-height: calc(var(--stage-w) * 1.4 + 40px);
+}
+
+.stage-caption {
+  border-radius: 4px;
+  background: rgba(18, 14, 11, 0.85);
+  border-color: var(--kin-line);
+  font-size: 14px;
+}
+
+.nope-stamp {
+  font-family: var(--serif);
+  font-style: normal;
+  color: var(--washi);
+  background: var(--shu);
+  border: none;
+  box-shadow: inset 0 0 0 4px var(--shu), inset 0 0 0 6px rgba(241, 230, 204, 0.75);
+  text-shadow: none;
+  border-radius: 6px;
+}
+
+/* 牌堆 / 弃牌堆 */
+.pile {
+  width: var(--pile-w);
+  height: calc(var(--pile-w) * 1.4);
+}
+
+.pile .pcard.pile-layer,
+.pile .pile-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.pile .pcard.mini {
+  width: var(--pile-w);
+}
+
+.pile-slot {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border: 1.5px dashed rgba(198, 161, 74, 0.45);
+  border-radius: 8px;
+  font-family: var(--serif);
+  font-size: calc(var(--pile-w) * 0.36);
+  font-weight: 900;
+  color: rgba(198, 161, 74, 0.32);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.pile-count {
+  border-radius: 4px;
+  background: var(--sumi);
+  border-color: var(--kin-line);
+  color: var(--washi);
+  min-width: 34px;
+  text-align: center;
+}
+
+.pile-label {
+  letter-spacing: 4px;
+  color: rgba(241, 230, 204, 0.6);
+}
+
+/* ---------------- 我的区域：立绘卡 ---------------- */
+
+.my-char-badge {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  align-self: end;
+  margin: 0 0 16px 16px;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 10px;
+  border-radius: var(--radius);
+  background: rgba(18, 14, 11, 0.88);
+  border: 1px solid var(--kin-line);
+  box-shadow:
+    inset 0 0 0 3px rgba(18, 14, 11, 0.8),
+    inset 0 0 0 4px color-mix(in srgb, var(--theme, #c6a14a) 45%, transparent),
+    0 10px 24px rgba(0, 0, 0, 0.45);
+  z-index: 8;
+}
+
+.my-char-portrait {
+  width: 64px;
+  height: 84px;
+  border-radius: 6px;
+}
+
+.my-char-info {
+  flex-wrap: wrap;
+  flex-direction: row;
+  gap: 4px;
+  align-content: flex-start;
+}
+
+.my-char-name {
+  flex-basis: 100%;
+  font-size: 16px;
+  letter-spacing: 1px;
+}
+
+.my-char-player {
+  flex-basis: 100%;
+  margin-bottom: 4px;
+}
+
+.seat-status-badge {
+  border-radius: 4px;
+}
+
+/* ---------------- 我的区域：手牌扇 ---------------- */
+
+.handzone {
+  height: var(--myzone-h);
+  padding: 0 0 24px;
+  overflow: visible;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 6;
+}
+
+.handfan {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  width: 100%;
+  padding: 0 12px;
+  overflow: visible;
+}
+
+.fan-card {
+  position: relative;
+  flex-shrink: 0;
+  transform-origin: 50% 130%;
+}
+
+/* 按张数自动重叠：总宽超出容器时负间距吃掉超出部分，不超出时保留 6px 间隙 */
+.fan-card + .fan-card {
+  margin-left: min(6px, calc((100% - 48px - var(--n) * var(--hand-w)) / (var(--n) - 1)));
+}
+
+.fan-card:hover {
+  z-index: 80 !important;
+}
+
+.handfan-empty {
+  font-family: var(--serif);
+  letter-spacing: 3px;
+  color: rgba(241, 230, 204, 0.4);
+  padding-bottom: 40px;
+}
+
+.handzone.is-targeted::before {
+  border-radius: 4px;
+  background: var(--shu);
+  color: var(--washi);
+  border: none;
+  box-shadow: inset 0 0 0 2px rgba(241, 230, 204, 0.55);
+  top: -6px;
+}
+
+/* ---------------- 我的区域：操作列 ---------------- */
+
+.actionbar {
+  align-self: end;
+  align-content: flex-end;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 16px 16px 0;
+}
+
+.actionbar > * {
+  flex: 1 1 calc(50% - 4px);
+  min-height: 40px;
+}
+
+.actionbar .action-main {
+  flex-basis: 100%;
+  order: -2;
+  padding: 14px 16px;
+  font-family: var(--serif);
+  font-size: 17px;
+  letter-spacing: 2px;
+  border-radius: 6px;
+  background: rgba(36, 28, 22, 0.9);
+  border: 1px solid var(--border);
+}
+
+.actionbar .action-main.is-active {
+  background: linear-gradient(180deg, #d2453a 0%, var(--shu) 45%, var(--shu-deep) 100%);
+  color: var(--washi);
+  border: 1px solid rgba(198, 161, 74, 0.7);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 3px 0 #4e110c,
+    0 0 26px rgba(192, 48, 40, 0.45);
+  animation: none;
+}
+
+.actionbar .action-nope {
+  flex-basis: 100%;
+  order: -1;
+  border-radius: 6px;
+  font-family: var(--serif);
+}
+
+.actionbar .action-skill,
+.actionbar .action-combo {
+  border-radius: 6px;
+  border-color: var(--kin-line);
+  background: rgba(198, 161, 74, 0.08);
+  font-size: 14px;
+}
+
+.actionbar .emote-wrap,
+.actionbar .action-toggle {
+  flex: 0 0 40px;
+  order: 10;
+}
+
+.actionbar .emote-wrap > button,
+.actionbar .action-toggle {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.actionbar .action-clear {
+  order: 9;
+  flex-basis: 100%;
+  min-height: 32px;
+}
+
+/* ---------------- 横幅 / 日志 / toast ---------------- */
+
+.turn-banner {
+  font-family: var(--serif);
+  border-radius: 6px;
+  background: rgba(18, 14, 11, 0.9);
+  border: 1px solid var(--kin-line);
+}
+
+.turn-banner.is-gold {
+  color: var(--washi);
+  background: var(--shu);
+  border: none;
+  letter-spacing: 12px;
+  text-indent: 12px;
+  padding: 14px 44px;
+  box-shadow:
+    inset 0 0 0 4px var(--shu),
+    inset 0 0 0 6px rgba(241, 230, 204, 0.75),
+    0 0 60px rgba(192, 48, 40, 0.45);
+  rotate: -2deg;
+}
+
+.boom-banner {
+  border-radius: 6px;
+  font-family: var(--serif);
+}
+
+.skill-flash {
+  border-radius: 4px;
+  background: rgba(18, 14, 11, 0.92);
+  font-family: var(--serif);
+  letter-spacing: 1px;
+}
+
+.log-toggle {
+  border-radius: 4px;
+  border-color: var(--kin-line);
+  background: rgba(18, 14, 11, 0.85);
+  font-family: var(--serif);
+  letter-spacing: 2px;
+}
+
+.log-panel {
+  width: 280px;
+  border-radius: 6px;
+  border-color: var(--kin-line);
+  background: rgba(18, 14, 11, 0.94);
+}
+
+.toast,
+.event-toast {
+  border-radius: 4px;
+  border: 1px solid var(--kin-line);
+}
+
+.toast {
+  bottom: calc(var(--myzone-h) + 16px);
+}
+
+/* ==========================================================================
+   窄屏 / 手机：顶部头像条 + 小漆盘 + 操作行 + 全宽手牌扇
+   ========================================================================== */
+
+@media (max-height: 780px) and (min-width: 901px) {
+  :root {
+    --hand-w: 104px;
+    --stage-w: 136px;
+    --pile-w: 70px;
+  }
+}
+
+@media (max-width: 900px) {
+  :root {
+    --hand-w: 82px;
+    --stage-w: 112px;
+    --pile-w: 56px;
+    --myzone-h: calc(var(--hand-w) * 1.4 + 52px);
+  }
+
+  .table-root {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      'top top'
+      'opp opp'
+      'center center'
+      'me act'
+      'hand hand';
+  }
+
+  .statusline {
+    gap: 6px;
+    padding: 8px 104px 4px 10px;
+    min-height: 0;
+    font-size: 12px;
+  }
+
+  .status-deck,
+  .status-me {
+    display: none;
+  }
+
+  /* 对手：横向头像条（覆盖内联的弧形坐标） */
+  .table-opponents {
+    grid-area: opp;
+    position: relative !important;
+    inset: auto;
+    display: flex;
+    justify-content: safe center;
+    gap: 6px;
+    padding: 4px 10px 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    pointer-events: auto;
+  }
+
+  .table-seat {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+    transform: none;
+    flex: 0 0 auto;
+    min-width: 64px;
+  }
+
+  .table-seat-portrait {
+    width: 50px;
+    height: 50px;
+    border-width: 2px;
+  }
+
+  .table-seat-char {
+    display: none;
+  }
+
+  .table-seat-name {
+    font-size: 11px;
+    max-width: 68px;
+  }
+
+  .table-seat-info {
+    padding: 2px 6px;
+  }
+
+  .table-center-v2 {
+    padding-top: 0;
+    gap: 14px;
+  }
+
+  .table-center-v2::before {
+    top: 50%;
+    width: 96%;
+    height: min(88%, 320px);
+  }
+
+  .stage {
+    flex: 0 1 auto;
+    min-height: calc(var(--stage-w) * 1.4 + 30px);
+  }
+
+  .stage-caption {
+    font-size: 12px;
+    padding: 3px 10px;
+  }
+
+  .pile-label {
+    font-size: 10px;
+    letter-spacing: 2px;
+  }
+
+  .my-char-badge {
+    margin: 0 0 6px 10px;
+    padding: 6px;
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 6px;
+    max-width: 150px;
+    align-self: center;
+  }
+
+  .my-char-portrait {
+    width: 36px;
+    height: 46px;
+  }
+
+  .my-char-name {
+    font-size: 13px;
+  }
+
+  .my-char-player {
+    display: none;
+  }
+
+  .my-char-info .seat-status-badge {
+    font-size: 10px;
+    padding: 0 4px;
+  }
+
+  .actionbar {
+    align-self: center;
+    justify-content: flex-end;
+    padding: 0 10px 6px 6px;
+    gap: 6px;
+  }
+
+  .actionbar > * {
+    flex: 0 0 auto;
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+
+  .actionbar .action-main {
+    flex: 1 1 auto;
+    flex-basis: auto;
+    padding: 10px 12px;
+    font-size: 15px;
+    letter-spacing: 1px;
+  }
+
+  .actionbar .action-nope {
+    flex: 1 1 auto;
+    flex-basis: auto;
+  }
+
+  .actionbar .emote-wrap,
+  .actionbar .action-toggle {
+    flex: 0 0 40px;
+  }
+
+  .handzone {
+    padding-bottom: 20px;
+  }
+
+  .handfan {
+    height: auto;
+    padding: 0 6px;
+  }
+
+  .log-panel {
+    width: min(78vw, 300px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .table-seat.is-current .table-seat-portrait,
+  .action-nope,
+  .seat-status-badge,
+  .pcard.is-glow::before,
+  .turn-vignette,
+  .char-confirm {
+    animation: none !important;
+  }
+}
