@@ -5,6 +5,11 @@
 [English](./README.en.md) | **简体中文**
 
 <p align="center">
+  <a href="https://bombcat-carovon.up.railway.app/"><b>🎮 立即在线体验 → bombcat-carovon.up.railway.app</b></a><br/>
+  <sub>打开即玩，无需注册：输入昵称 → 人机练习，或创建房间把 4 位房间码发给朋友 · 支持中文 / English</sub>
+</p>
+
+<p align="center">
   <b>联机对战 · 18 位角色 · 全局规则 · 自定义卡组 —— 网页版炸弹猫，全部原创实现</b>
 </p>
 

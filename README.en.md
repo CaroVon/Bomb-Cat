@@ -5,6 +5,11 @@
 **English** | [简体中文](./README.md)
 
 <p align="center">
+  <a href="https://bombcat-carovon.up.railway.app/"><b>🎮 Play now → bombcat-carovon.up.railway.app</b></a><br/>
+  <sub>No sign-up: enter a nickname → Practice vs AI, or create a room and share the 4-letter code with friends · 中文 / English</sub>
+</p>
+
+<p align="center">
   <b>Online multiplayer · 18 characters · world rules · custom decks — a web-based Exploding Kittens-style game, fully original</b>
 </p>
 
