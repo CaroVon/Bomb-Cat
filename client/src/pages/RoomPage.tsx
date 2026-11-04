@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { BUILTIN_CHARACTERS, classicDeckFor, MAX_PLAYERS, type DeckDef } from '@bombcat/shared';
+import { BUILTIN_CHARACTERS, charText, classicDeckFor, MAX_PLAYERS, type DeckDef } from '@bombcat/shared';
+import { useI18n } from '../i18n';
 import { eachPlayer, sendAct, useGame } from '../lib/game';
 import { loadDecks } from '../lib/decks';
 import { getActiveBuild, loadBuilds, setActiveBuildId } from '../lib/builds';
@@ -9,6 +10,7 @@ import { portraitUrl } from '../lib/portraits';
 
 export default function RoomPage() {
   const game = useGame();
+  const { lang, t } = useI18n();
   const navigate = useNavigate();
   const state = game.state;
   const decks = useMemo(loadDecks, []);
@@ -56,7 +58,7 @@ export default function RoomPage() {
   if (!state) {
     return (
 <div className="page page-room">
-        <p className="muted">连接中……</p>
+        <p className="muted">{t('common.connecting')}</p>
       </div>
     );
   }
@@ -73,9 +75,9 @@ export default function RoomPage() {
   return (
     <div className="page page-room">
       <div className="h-row" style={{ marginBottom: 16 }}>
-        <span className="title">等待室</span>
-        <span className="tag">{players.length}/{MAX_PLAYERS} 人</span>
-        {isHost && <span className="tag" style={{ borderColor: 'var(--accent)' }}>你是房主</span>}
+        <span className="title">{t('room.title')}</span>
+        <span className="tag">{t('room.count', { n: players.length, max: MAX_PLAYERS })}</span>
+        {isHost && <span className="tag" style={{ borderColor: 'var(--accent)' }}>{t('room.youHost')}</span>}
       </div>
 
       <div
@@ -88,13 +90,13 @@ export default function RoomPage() {
         <div>
           <div className="panel" style={{ marginBottom: 16 }}>
             <div className="muted" style={{ fontSize: 13, textAlign: 'center' }}>
-              房间码（发给朋友，大厅输入即可加入）
+              {t('room.codeHint')}
             </div>
             <div className="room-code-big">{state.roomCode}</div>
           </div>
 
           <div className="panel">
-            <h4 style={{ margin: '0 0 10px' }}>玩家</h4>
+            <h4 style={{ margin: '0 0 10px' }}>{t('room.players')}</h4>
             {players.map((p) => {
               const ch = BUILTIN_CHARACTERS.find((c) => c.id === p.characterId);
               return (
@@ -107,9 +109,9 @@ export default function RoomPage() {
                   />
                   <span style={{ fontSize: 22, display: 'none' }}>{ch?.emoji ?? '🙂'}</span>
                   <span>{p.name}</span>
-                  {p.isHost && <span className="tag">房主</span>}
-                  <span className="muted" style={{ fontSize: 12 }}>{ch?.name ?? '未选角色'}</span>
-                  {!p.connected && <span className="tag" style={{ color: 'var(--danger)' }}>掉线</span>}
+                  {p.isHost && <span className="tag">{t('room.host')}</span>}
+                  <span className="muted" style={{ fontSize: 12 }}>{ch ? charText(ch, lang).name : t('room.noChar')}</span>
+                  {!p.connected && <span className="tag" style={{ color: 'var(--danger)' }}>{t('room.offline')}</span>}
                 </div>
               );
             })}
@@ -117,13 +119,13 @@ export default function RoomPage() {
 
           {isHost && (
             <div className="panel" style={{ marginTop: 16 }}>
-              <h4 style={{ margin: '0 0 10px' }}>卡组</h4>
+              <h4 style={{ margin: '0 0 10px' }}>{t('room.deck')}</h4>
               <div className="h-row">
                 <select value={deckId} onChange={(e) => setDeckId(e.target.value)}>
-                  <option value="classic">经典卡组</option>
+                  <option value="classic">{t('deck.classic')}</option>
                   {decks.map((d) => (
                     <option key={d.id} value={d.id}>
-                      {d.name}（自定义）
+                      {t('room.customDeck', { name: d.name })}
                     </option>
                   ))}
                 </select>
@@ -132,30 +134,30 @@ export default function RoomPage() {
                   className="muted"
                   style={{ fontSize: 13, textDecoration: 'none' }}
                 >
-                  去定制工坊编辑 →
+                  {t('room.editInWorkshop')}
                 </Link>
               </div>
               {deckId === 'classic' && (
                 <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
-                  📦 {finalCount} 人局：动作牌 {actionCards} 张 + 爆炸猫 {finalCount + 2} 张（随机分布牌堆）
+                  {t('room.deckInfo', { n: finalCount, action: actionCards, bombs: finalCount + 2 })}
                 </p>
               )}
               <div className="h-row" style={{ marginTop: 12 }}>
                 <span className="muted" style={{ fontSize: 13 }}>
-                  🤖 开局补机器人至
+                  {t('room.fillBots')}
                 </span>
                 <select value={fillTo} onChange={(e) => setFillTo(Number(e.target.value))}>
-                  <option value={0}>不补</option>
+                  <option value={0}>{t('room.noFill')}</option>
                   {[2, 3, 4, 5, 6, 7, 8].map((n) => (
                     <option key={n} value={n}>
-                      {n} 人
+                      {t('room.nPlayers', { n })}
                     </option>
                   ))}
                 </select>
               </div>
               {fillTo >= 2 && players.length < fillTo && (
                 <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
-                  当前 {players.length} 名玩家，开局时将补 {botsToFill} 个机器人
+                  {t('room.willFill', { n: players.length, bots: botsToFill })}
                 </p>
               )}
             </div>
@@ -163,23 +165,23 @@ export default function RoomPage() {
 
           {/* 我的出战构筑（所有人可选） */}
           <div className="panel" style={{ marginTop: 16 }}>
-            <h4 style={{ margin: '0 0 8px' }}>🎴 我的出战构筑</h4>
+            <h4 style={{ margin: '0 0 8px' }}>{t('room.myBuild')}</h4>
             <div className="h-row">
               <select value={buildId} onChange={(e) => setBuildId(e.target.value)}>
-                <option value="">经典发牌（无构筑）</option>
+                <option value="">{t('room.noBuild')}</option>
                 {builds.map((b) => (
                   <option key={b.id} value={b.id}>
-                    {b.name}（10 张：6 入起手 / 4 入公共堆）
+                    {t('room.buildOpt', { name: b.name })}
                   </option>
                 ))}
               </select>
               <Link to="/editor" className="muted" style={{ fontSize: 13, textDecoration: 'none' }}>
-                去编辑构筑 →
+                {t('room.editBuild')}
               </Link>
             </div>
             {buildId && (
               <p className="muted" style={{ fontSize: 12, margin: '8px 0 0' }}>
-                ✅ 构筑已就绪：开局时 6 张随机进入你的起手，4 张洗入公共牌堆
+                {t('room.buildReady')}
               </p>
             )}
           </div>
@@ -191,17 +193,17 @@ export default function RoomPage() {
               disabled={players.length < 2 && fillTo < 2}
               onClick={() => sendAct({ action: 'startGame', fillTo })}
             >
-              {players.length < 2 && fillTo < 2 ? '至少 2 人（或补机器人）才能开始' : '开始游戏！'}
+              {players.length < 2 && fillTo < 2 ? t('room.needTwo') : t('room.start')}
             </button>
           ) : (
             <p className="muted" style={{ textAlign: 'center', marginTop: 16 }}>
-              等待房主开始……
+              {t('room.waitHost')}
             </p>
           )}
         </div>
 
         <div className="panel">
-          <h4 style={{ margin: '0 0 8px' }}>选择你的角色</h4>
+          <h4 style={{ margin: '0 0 8px' }}>{t('room.pickChar')}</h4>
           <CharacterSelect
             selectedId={players.find((p) => p.sessionId === myId)?.characterId ?? 'none'}
             onSelect={(id) => sendAct({ action: 'setCharacter', characterId: id })}

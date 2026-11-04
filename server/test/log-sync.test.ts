@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Server } from 'colyseus';
 import { Client, type Room } from '@colyseus/sdk';
 import { GameRoom } from '../src/rooms/GameRoom.js';
-import type { DeckDef, HandCard, ServerMessage } from '@bombcat/shared';
+import { formatMsg, type DeckDef, type HandCard, type ServerMessage } from '@bombcat/shared';
 
 const PORT = 3571;
 const URL = `ws://localhost:${PORT}`;
@@ -43,7 +43,9 @@ const DECK: DeckDef = {
 
 function readLogs(p: Player): string[] {
   const log = p.room.state?.log;
-  return log ? (log.toArray?.() ?? log) : [];
+  // state.log 同步的是编码后的 LocMsg，按中文渲染后再断言
+  const raw: string[] = log ? (log.toArray?.() ?? log) : [];
+  return raw.map((l) => formatMsg('zh', l));
 }
 
 beforeAll(async () => {

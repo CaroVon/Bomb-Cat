@@ -1,4 +1,5 @@
 import { validateDeck, type DeckDef } from '@bombcat/shared';
+import { tr } from '../i18n';
 
 /**
  * 卡组分享码（EK2 v2.0 Deck Creator 分享机制的开源等价物）：
@@ -41,7 +42,7 @@ export interface DecodeResult {
 export function decodeDeck(code: string): DecodeResult {
   const trimmed = code.trim();
   if (!trimmed.startsWith(PREFIX)) {
-    return { ok: false, error: '不是有效的卡组码（应以 BM1. 开头）' };
+    return { ok: false, error: tr('share.badPrefix') };
   }
   try {
     const payload = JSON.parse(fromBase64Url(trimmed.slice(PREFIX.length))) as {
@@ -50,7 +51,7 @@ export function decodeDeck(code: string): DecodeResult {
       k?: DeckDef['customCards'];
     };
     if (!payload.n || !payload.c) {
-      return { ok: false, error: '卡组码内容不完整' };
+      return { ok: false, error: tr('share.incomplete') };
     }
     const deck: DeckDef = {
       id: `shared-${Date.now()}`,
@@ -60,10 +61,10 @@ export function decodeDeck(code: string): DecodeResult {
     };
     const r = validateDeck(deck, 3);
     if (!r.ok) {
-      return { ok: false, error: `卡组不合法：${r.errors.slice(0, 2).join('；')}` };
+      return { ok: false, error: tr('share.invalid', { errors: r.errors.slice(0, 2).join(tr('common.listSep')) }) };
     }
     return { ok: true, deck };
   } catch {
-    return { ok: false, error: '卡组码解析失败（已损坏或被截断）' };
+    return { ok: false, error: tr('share.parseFail') };
   }
 }

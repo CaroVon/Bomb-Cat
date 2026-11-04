@@ -1039,3 +1039,45 @@ select:focus {
     animation: none !important;
   }
 }
+
+/* ---------------- 语言切换「中 / EN」 ---------------- */
+
+.lang-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 3px;
+  background: rgba(10, 8, 6, 0.78);
+  border: 1px solid var(--kin-line);
+  border-radius: 4px;
+  font-family: var(--serif);
+  font-size: 12px;
+  line-height: 1;
+  flex: none;
+}
+
+.lang-toggle button {
+  all: unset;
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: 3px;
+  color: var(--muted, rgba(241, 230, 204, 0.55));
+  letter-spacing: 1px;
+}
+
+.lang-toggle button:hover {
+  color: var(--washi, #f1e6cc);
+}
+
+.lang-toggle button.on {
+  color: var(--gold);
+  background: rgba(198, 161, 74, 0.14);
+}
+
+.lang-toggle button:focus-visible {
+  outline: 1px solid var(--gold);
+}
+
+.lang-toggle .lang-sep {
+  color: var(--kin-line);
+}

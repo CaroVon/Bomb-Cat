@@ -4,10 +4,11 @@ import {
   BUILTIN_CHARACTERS,
   BUILTIN_CHARACTER_MAP,
   CHARACTER_RPG,
-  ROLE_COLOR,
-  ROLE_LABEL,
+  charText,
+  roleLabel,
   type CharacterDef,
 } from '@bombcat/shared';
+import { useI18n, type TFn } from '../i18n';
 import { sfx } from '../lib/sound';
 import { portraitUrl } from '../lib/portraits';
 
@@ -17,18 +18,18 @@ interface Props {
 }
 
 /** 触发条件标签文本 */
-function triggerLabel(trigger: string): string {
+function triggerLabel(trigger: string, t: TFn): string {
   switch (trigger) {
     case 'gameStart':
-      return '开局';
+      return t('char.trigger.gameStart');
     case 'turnStart':
-      return '回合开始';
+      return t('char.trigger.turnStart');
     case 'onStolenFrom':
-      return '被偷牌时';
+      return t('char.trigger.onStolenFrom');
     case 'onNoped':
-      return '被否认时';
+      return t('char.trigger.onNoped');
     case 'active':
-      return '主动';
+      return t('char.active');
     default:
       return trigger;
   }
@@ -36,6 +37,7 @@ function triggerLabel(trigger: string): string {
 
 /** 技能类型徽章 */
 function SkillBadge({ skill }: { skill: CharacterDef['skills'][0] }) {
+  const { t } = useI18n();
   const isPassive = skill.trigger !== 'active';
   const color = isPassive ? '#d4a557' : '#4a90c2';
   return (
@@ -43,15 +45,16 @@ function SkillBadge({ skill }: { skill: CharacterDef['skills'][0] }) {
       className="skill-badge"
       style={{ borderColor: color, color }}
     >
-      {isPassive ? '被动' : '主动'} · {triggerLabel(skill.trigger)}
+      {isPassive ? t('char.passive') : t('char.active')} · {triggerLabel(skill.trigger, t)}
     </span>
   );
 }
 
 /** 难度指示 */
 function Difficulty({ level }: { level: number }) {
+  const { t } = useI18n();
   return (
-    <span className="difficulty-dots" title={`难度 ${level}/3`}>
+    <span className="difficulty-dots" title={t('char.difficulty', { level })}>
       {[1, 2, 3].map((i) => (
         <span key={i} className={i <= level ? 'dot is-on' : 'dot'} />
       ))}
@@ -63,10 +66,12 @@ function Difficulty({ level }: { level: number }) {
  * RPG 式角色选择界面（炉石战棋式：竖版大卡 + 详情侧栏 + 底部小卡条）
  */
 export function CharacterSelect({ selectedId, onSelect }: Props) {
+  const { lang, t } = useI18n();
   const [hoverId, setHoverId] = useState<string>(selectedId ?? 'none');
   const displayId = hoverId || selectedId || 'none';
   const char = BUILTIN_CHARACTER_MAP.get(displayId) ?? BUILTIN_CHARACTERS[0]!;
   const rpg = CHARACTER_RPG[displayId] ?? CHARACTER_RPG['none']!;
+  const ct = charText(char, lang);
   const roleColor = rpg.themeColor;
   const isSelected = selectedId === displayId;
 
@@ -98,8 +103,8 @@ export function CharacterSelect({ selectedId, onSelect }: Props) {
                 }}
               />
               <div className="char-card-info">
-                <h3 className="char-name">{char.name}</h3>
-                <span className="char-title">{char.title}</span>
+                <h3 className="char-name">{ct.name}</h3>
+                <span className="char-title">{ct.title}</span>
               </div>
               {isSelected && <div className="char-selected-check">✓</div>}
             </motion.div>
@@ -116,15 +121,15 @@ export function CharacterSelect({ selectedId, onSelect }: Props) {
               exit={{ opacity: 0, x: -12 }}
               transition={{ duration: 0.2 }}
             >
-              <h2 className="detail-name">{char.name}</h2>
-              <div className="detail-title">{char.title}</div>
+              <h2 className="detail-name">{ct.name}</h2>
+              <div className="detail-title">{ct.title}</div>
 
               <div className="h-row" style={{ gap: 10, margin: '10px 0 14px' }}>
                 <span
                   className="role-badge"
                   style={{ background: `${roleColor}22`, borderColor: roleColor, color: roleColor }}
                 >
-                  {ROLE_LABEL[rpg.role]}
+                  {roleLabel(rpg.role, lang)}
                 </span>
                 <Difficulty level={rpg.difficulty} />
               </div>
@@ -132,24 +137,27 @@ export function CharacterSelect({ selectedId, onSelect }: Props) {
               {/* 技能展示（多技能角色全部列出，如数学老师四则运算） */}
               {char.skills.length > 0 ? (
                 <div className="skill-panel" style={{ maxHeight: 260, overflowY: 'auto' }}>
-                  {char.skills.map((sk) => (
+                  {char.skills.map((sk) => {
+                    const st = ct.skill(sk.id, sk);
+                    return (
                     <div key={sk.id} style={{ marginBottom: 10 }}>
                       <div className="h-row" style={{ gap: 8, marginBottom: 6 }}>
                         <SkillBadge skill={sk} />
-                        <strong style={{ fontSize: 15 }}>{sk.name}</strong>
+                        <strong style={{ fontSize: 15 }}>{st.name}</strong>
                       </div>
-                      <p className="skill-desc">{sk.description}</p>
+                      <p className="skill-desc">{st.description}</p>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="skill-panel">
-                  <p className="skill-desc muted">无技能，纯靠牌技。</p>
+                  <p className="skill-desc muted">{t('char.noSkill')}</p>
                 </div>
               )}
 
               {/* 背景故事 */}
-              <p className="char-lore">{rpg.lore}</p>
+              <p className="char-lore">{ct.lore || rpg.lore}</p>
 
               {/* 确认按钮 */}
               <button
@@ -160,7 +168,7 @@ export function CharacterSelect({ selectedId, onSelect }: Props) {
                   onSelect(isSelected ? 'none' : displayId);
                 }}
               >
-                {isSelected ? '✓ 已出战' : '确认出战'}
+                {isSelected ? t('char.locked') : t('char.confirm')}
               </button>
             </motion.div>
           </AnimatePresence>
@@ -188,7 +196,7 @@ export function CharacterSelect({ selectedId, onSelect }: Props) {
                 className="char-mini-portrait"
                 style={{ backgroundImage: `url(${portraitUrl(c.id)})` }}
               />
-              <span className="char-mini-name">{c.name}</span>
+              <span className="char-mini-name">{charText(c, lang).name}</span>
               {isSel && <span className="char-mini-check">✓</span>}
             </div>
           );

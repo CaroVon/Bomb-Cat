@@ -1,7 +1,8 @@
 import { Client, type Room } from '@colyseus/sdk';
 import { useSyncExternalStore } from 'react';
 import type { CardDef, ClientMessage, HandCard, ServerMessage } from '@bombcat/shared';
-import { BUILTIN_CARD_MAP } from '@bombcat/shared';
+import { BUILTIN_CARD_MAP, cardName, formatMsg } from '@bombcat/shared';
+import { getLang, tr } from '../i18n';
 import { GAME_SERVER_URL } from './config';
 import { joinOptions } from './identity';
 
@@ -13,7 +14,7 @@ export interface GameSnapshot {
   /** 用于强制重渲染的版本号 */
   version: number;
   hand: HandCard[];
-  toast: { id: number; text: string } | null;
+  toast: { id: number; text: string; key?: string } | null;
   peek: { id: number; cards: CardDef[] } | null;
   peekHandInfo: { id: number; playerName: string; cards: CardDef[] } | null;
   alterPrompt: CardDef[] | null;
@@ -89,8 +90,8 @@ export function useGame(): GameSnapshot {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
-function showToast(text: string): void {
-  snap.toast = { id: ++toastSeq, text };
+function showToast(text: string, key?: string): void {
+  snap.toast = { id: ++toastSeq, text, key };
   emit();
   const id = snap.toast.id;
   setTimeout(() => {
@@ -147,10 +148,10 @@ function attach(room: Room<any>): void {
     }
   });
   room.onMessage('error', (msg: ServerMessage) => {
-    if (msg.action === 'error') showToast(msg.message);
+    if (msg.action === 'error') showToast(msg.msg ? formatMsg(getLang(), msg.msg) : formatMsg(getLang(), msg.message));
   });
   room.onMessage('notice', (msg: ServerMessage & { text: string }) => {
-    if (msg.action === 'notice') showToast(msg.text);
+    if (msg.action === 'notice') showToast(msg.msg ? formatMsg(getLang(), msg.msg) : formatMsg(getLang(), msg.text), msg.msg?.k);
   });
   room.onMessage('peekDeck', (msg: ServerMessage & { cards: CardDef[] }) => {
     if (msg.action === 'peekDeck') {
@@ -202,14 +203,19 @@ function attach(room: Room<any>): void {
     snap.tearPrompt = { id: Date.now() + Math.random(), ...msg };
     emit();
   });
-  room.onMessage('digestReady', (msg: { cardName: string; instanceId: string }) => {
-    showToast(`🐷 消化完成：${msg.cardName}（本回合必须打出或丢弃这张牌）`);
+  room.onMessage('digestReady', (msg: { cardName: string; cardId?: string; instanceId: string }) => {
+    showToast(tr('toast.digest', { card: msg.cardId ? cardName(msg.cardId, getLang()) : msg.cardName }));
   });
-  room.onMessage('chaosDraw', (msg: { fromName: string; cardName: string }) => {
-    showToast(`🌀 混沌之触：${msg.fromName} 夺走了你的【${msg.cardName}】`);
+  room.onMessage('chaosDraw', (msg: { fromName: string; cardName: string; cardId?: string }) => {
+    showToast(
+      tr('toast.chaosDraw', {
+        from: msg.fromName,
+        card: msg.cardId ? cardName(msg.cardId, getLang()) : msg.cardName,
+      }),
+    );
   });
   room.onMessage('chaosTouch', (msg: { playerName: string }) => {
-    showToast(`🌀 ${msg.playerName} 施放混沌之触：本轮所有摸牌变为夺取！`);
+    showToast(tr('toast.chaosTouch', { name: msg.playerName }));
   });
   room.onMessage('futureRewrite', (msg: { cards: CardDef[] }) => {
     snap.futureRewritePrompt = msg.cards;
@@ -231,14 +237,14 @@ function attach(room: Room<any>): void {
     snap.helpPrompt = null;
     showToast(
       msg.accepted
-        ? `🧊 ${msg.helperName ?? '对方'} 帮助了你，冰冻 -1，本回合可以正常行动`
-        : `🧊 ${msg.helperName ?? '对方'} 拒绝了求助，可以继续问其他人`,
+        ? tr('toast.helpAccepted', { name: msg.helperName ?? tr('toast.someone') })
+        : tr('toast.helpRejected', { name: msg.helperName ?? tr('toast.someone') }),
     );
     emit();
   });
   /* ---- v4：邪恶苹果头 ---- */
   room.onMessage('appleGiven', (msg: { fromName: string; turns: number }) => {
-    showToast(`🍏 ${msg.fromName} 朝你扔了一个邪恶苹果！${msg.turns} 回合内可在自己回合吃掉它（交出一张手牌）`);
+    showToast(tr('toast.apple', { name: msg.fromName, turns: msg.turns }));
   });
 
   room.onLeave((code) => {
@@ -256,7 +262,7 @@ function attach(room: Room<any>): void {
     emit();
   });
   room.onError?.((code: number, message?: string) => {
-    snap.error = `连接错误 (${code}) ${message ?? ''}`;
+    snap.error = tr('err.connection', { code, message: message ?? '' });
     snap.status = 'error';
     emit();
   });
@@ -311,7 +317,7 @@ export async function joinRoom(code: string, name: string): Promise<void> {
     attach(room);
   } catch (e) {
     snap.status = 'error';
-    snap.error = e instanceof Error ? `加入失败：${e.message}` : String(e);
+    snap.error = e instanceof Error ? tr('err.joinFailed', { message: e.message }) : String(e);
     emit();
     throw e;
   }

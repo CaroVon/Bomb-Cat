@@ -2,6 +2,7 @@ import type {
   CardDef,
   CardEffect,
   ServerMessage,
+  LocMsg,
 } from '@bombcat/shared';
 
 export interface CardInstance {
@@ -149,7 +150,7 @@ export type EngineEvent =
   | { type: 'helpResolved' }
   | { type: 'death'; sessionId: string }
   | { type: 'revive'; sessionId: string }
-  | { type: 'invalid'; sessionId: string; message: string }
+  | { type: 'invalid'; sessionId: string; message: string; msg: LocMsg }
   | {
       type: 'gameEnd';
       winnerSessionId: string;

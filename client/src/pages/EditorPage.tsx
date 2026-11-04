@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import {
   BUILTIN_CARDS,
   CLASSIC_DECK,
+  cardName,
   CUSTOM_CARD_ALLOWED_EFFECTS,
   type CardDef,
   type CardEffect,
@@ -22,28 +23,22 @@ import { decodeDeck, encodeDeck } from '../lib/share';
 import { CardView, setSkinMap } from '../components/CardView';
 import Modal from '../components/Modal';
 import { BuildSection, RulesCodex } from '../components/BuildEditor';
+import { useI18n, type TFn } from '../i18n';
+import { UI, type UiKey } from '../i18n/ui';
 
-const EFFECT_LABEL: Record<string, string> = {
-  skip: '跳过（结束回合不摸牌）',
-  attack: '攻击（下家连走 2 回合）',
-  shuffle: '洗牌',
-  peek: '预知未来（看牌堆顶 3 张）',
-  alterFuture: '改变未来（重排牌堆顶 3 张）',
-  stealRandom: '偷 1 张随机牌（需目标）',
-  stealNamed: '指名偷牌（需目标）',
-  peekHand: '偷看手牌（需目标）',
-  swapHand: '交换手牌（需目标）',
-  drawFromBottom: '结束回合，改从牌堆底摸牌',
-  reverse: '反转出牌方向',
-  selfDraw: '额外摸牌',
-};
+/** 自定义卡效果说明（按语言） */
+function effectLabel(type: string, t: TFn): string {
+  const key = `effect.${type}` as UiKey;
+  return key in UI ? t(key) : type;
+}
 
 export default function EditorPage() {
+  const { t } = useI18n();
   return (
     <div className="page page-room">
-      <h2 className="title" style={{ marginTop: 0 }}>🎨 定制工坊</h2>
+      <h2 className="title" style={{ marginTop: 0 }}>{t('editor.title')}</h2>
       <p className="muted" style={{ marginTop: -8 }}>
-        换上朋友的照片做卡面、设计你自己的特殊卡牌，房主开局时选用即可生效
+        {t('editor.subtitle')}
       </p>
       <SkinSection />
       <DeckSection />
@@ -56,6 +51,7 @@ export default function EditorPage() {
 /* ==================== 卡面皮肤 ==================== */
 
 function SkinSection() {
+  const { lang, t } = useI18n();
   const [packs, setPacks] = useState(loadSkinPacks);
   const [active, setActive] = useState(getActiveSkinPackId());
   const [editing, setEditing] = useState<SkinPackDraft | null>(null);
@@ -91,19 +87,19 @@ function SkinSection() {
   return (
     <div className="panel" style={{ marginBottom: 20 }}>
       <div className="h-row" style={{ marginBottom: 12 }}>
-        <h3 style={{ margin: 0 }}>📷 卡面皮肤包</h3>
+        <h3 style={{ margin: 0 }}>{t('skin.title')}</h3>
         <button className="primary" onClick={() => setEditing({ id: '', name: '', images: {}, pendingCardId: '' })}>
-          新建皮肤包
+          {t('skin.new')}
         </button>
       </div>
 
       <div className="h-row">
-        {packs.length === 0 && <span className="muted">还没有皮肤包，点上面按钮创建（上传朋友照片当卡面！）</span>}
+        {packs.length === 0 && <span className="muted">{t('skin.none')}</span>}
         {packs.map((p) => (
           <div key={p.id} className="char-card" style={{ minWidth: 180 }}>
             <h4 style={{ margin: '0 0 4px' }}>{p.name}</h4>
             <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-              {p.skins.length} 张自定义卡面
+              {t('skin.count', { n: p.skins.length })}
             </div>
             <div className="h-row">
               <button
@@ -115,19 +111,19 @@ function SkinSection() {
                   setSkinMap(activeSkinMap());
                 }}
               >
-                {active === p.id ? '使用中' : '启用'}
+                {active === p.id ? t('build.inUse') : t('build.use')}
               </button>
               <button
                 style={{ padding: '6px 12px', fontSize: 13 }}
                 onClick={() => {
-                  if (!confirm(`删除皮肤包「${p.name}」？`)) return;
+                  if (!confirm(t('skin.confirmDelete', { name: p.name }))) return;
                   deleteSkinPack(p.id);
                   setPacks(loadSkinPacks());
                   setActive(getActiveSkinPackId());
                   setSkinMap(activeSkinMap());
                 }}
               >
-                删除
+                {t('common.delete')}
               </button>
             </div>
           </div>
@@ -135,47 +131,46 @@ function SkinSection() {
       </div>
 
       <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
-        皮肤仅影响你自己屏幕上的卡面显示（纯本地/个人云端），不影响游戏规则与其他玩家。
-        照片会在浏览器内自动压缩到 720px / ~200KB 再保存。
+        {t('skin.note')}
       </p>
 
       <Modal
         open={!!editing}
-        title="编辑皮肤包"
+        title={t('skin.editTitle')}
         onClose={() => setEditing(null)}
         footer={
           <>
             <button className="primary" onClick={saveDraft} disabled={!editing?.name.trim()}>
-              保存
+              {t('common.save')}
             </button>
-            <button onClick={() => setEditing(null)}>取消</button>
+            <button onClick={() => setEditing(null)}>{t('common.cancel')}</button>
           </>
         }
       >
         {editing && (
           <>
             <div className="field" style={{ marginBottom: 14 }}>
-              <label>皮肤包名称</label>
+              <label>{t('skin.name')}</label>
               <input
                 value={editing.name}
                 maxLength={20}
-                placeholder="比如：兄弟们的脸"
+                placeholder={t('skin.namePh')}
                 onChange={(e) => setEditing({ ...editing, name: e.target.value })}
               />
             </div>
 
             <div className="field" style={{ marginBottom: 14 }}>
-              <label>选择要换脸的卡 → 上传照片</label>
+              <label>{t('skin.pickCard')}</label>
               <div className="h-row">
                 <select
                   value={editing.pendingCardId}
                   onChange={(e) => setEditing({ ...editing, pendingCardId: e.target.value })}
                   style={{ maxWidth: 220 }}
                 >
-                  <option value="">选择卡牌…</option>
+                  <option value="">{t('skin.selectCard')}</option>
                   {BUILTIN_CARDS.filter((c) => c.kind !== 'exploding').map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.emoji} {c.name}
+                      {c.emoji} {cardName(c.id, lang)}
                     </option>
                   ))}
                 </select>
@@ -183,7 +178,7 @@ function SkinSection() {
                   disabled={!editing.pendingCardId}
                   onClick={() => fileRef.current?.click()}
                 >
-                  上传照片
+                  {t('skin.upload')}
                 </button>
                 <input
                   ref={fileRef}
@@ -208,7 +203,7 @@ function SkinSection() {
                       className="skin-preview"
                       style={{ backgroundImage: `url(${url})` }}
                     >
-                      <span className="pcard-name">{def?.name}</span>
+                      <span className="pcard-name">{def ? cardName(def.id, lang) : ''}</span>
                     </div>
                     <button
                       className="muted"
@@ -219,7 +214,7 @@ function SkinSection() {
                         setEditing({ ...editing, images: next });
                       }}
                     >
-                      移除
+                      {t('common.remove')}
                     </button>
                   </div>
                 );
@@ -235,6 +230,7 @@ function SkinSection() {
 /* ==================== 卡组编辑 ==================== */
 
 function DeckSection() {
+  const { lang, t } = useI18n();
   const [decks, setDecks] = useState(loadDecks);
   const [draft, setDraft] = useState<DeckDef | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
@@ -271,7 +267,7 @@ function DeckSection() {
 
   /** 一键加入扩展包（在经典基础上叠加强度适中的扩展卡） */
   function addExpansion(kind: 'imploding' | 'streaking'): void {
-    const base = draft ?? { ...CLASSIC_DECK, id: '', name: '我的卡组' };
+    const base = draft ?? { ...CLASSIC_DECK, id: '', name: t('deck.myDeck') };
     const counts = { ...base.counts };
     if (kind === 'imploding') {
       counts.reverse = (counts.reverse ?? 0) + 3;
@@ -288,58 +284,58 @@ function DeckSection() {
   function doImport(): void {
     const r = decodeDeck(importCode);
     if (!r.ok || !r.deck) {
-      setImportMsg(r.error ?? '导入失败');
+      setImportMsg(r.error ?? t('deck.importFail'));
       return;
     }
     void saveDeck(r.deck);
     setDecks(loadDecks());
     setImportCode('');
-    setImportMsg(`已导入「${r.deck.name}」`);
+    setImportMsg(t('deck.imported', { name: r.deck.name }));
   }
 
   return (
     <div className="panel">
       <div className="h-row" style={{ marginBottom: 12 }}>
-        <h3 style={{ margin: 0 }}>🃏 自定义卡组</h3>
+        <h3 style={{ margin: 0 }}>{t('deck.title')}</h3>
         <button
           className="primary"
           onClick={() => {
-            setDraft({ ...CLASSIC_DECK, id: '', name: '我的卡组' });
+            setDraft({ ...CLASSIC_DECK, id: '', name: t('deck.myDeck') });
             setErrors([]);
           }}
         >
-          基于经典卡组新建
+          {t('deck.newFromClassic')}
         </button>
-        <button onClick={() => addExpansion('imploding')} title="反转/改变未来/摸牌底/万能猫">
-          + 内爆扩展
+        <button onClick={() => addExpansion('imploding')} title={t('deck.impTitle')}>
+          {t('deck.imploding')}
         </button>
-        <button onClick={() => addExpansion('streaking')} title="果奔猫：藏猫诈唬">
-          + 果奔扩展
+        <button onClick={() => addExpansion('streaking')} title={t('deck.strTitle')}>
+          {t('deck.streaking')}
         </button>
         <span style={{ flex: 1 }} />
         <input
           value={importCode}
           onChange={(e) => setImportCode(e.target.value)}
-          placeholder="粘贴卡组分享码 BM1.…"
+          placeholder={t('deck.pastePh')}
           style={{ width: 220, fontSize: 12 }}
         />
         <button onClick={doImport} disabled={!importCode.trim()}>
-          导入
+          {t('deck.import')}
         </button>
       </div>
       {importMsg && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{importMsg}</div>}
 
       <div className="h-row">
         <div className="char-card" style={{ minWidth: 180 }}>
-          <h4 style={{ margin: '0 0 4px' }}>经典卡组</h4>
-          <div className="muted" style={{ fontSize: 12 }}>内置默认</div>
+          <h4 style={{ margin: '0 0 4px' }}>{t('deck.classic')}</h4>
+          <div className="muted" style={{ fontSize: 12 }}>{t('deck.builtin')}</div>
         </div>
         {decks.map((d) => (
           <div key={d.id} className="char-card" style={{ minWidth: 180 }}>
             <h4 style={{ margin: '0 0 4px' }}>{d.name}</h4>
             <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-              {Object.values(d.counts).reduce((a, b) => a + b, 0)} 张
-              {d.customCards.length > 0 ? ` · 含 ${d.customCards.length} 张自定义卡` : ''}
+              {t('build.cards', { n: Object.values(d.counts).reduce((a, b) => a + b, 0) })}
+              {d.customCards.length > 0 ? t('deck.withCustom', { n: d.customCards.length }) : ''}
             </div>
             <div className="h-row">
               <button
@@ -349,24 +345,24 @@ function DeckSection() {
                   setErrors([]);
                 }}
               >
-                编辑
+                {t('common.edit')}
               </button>
               <button
                 style={{ padding: '6px 12px', fontSize: 13 }}
                 onClick={() => setShareCode(encodeDeck(d))}
-                title="生成分享码，发给朋友即可导入"
+                title={t('deck.shareTitle')}
               >
-                分享
+                {t('deck.share')}
               </button>
               <button
                 style={{ padding: '6px 12px', fontSize: 13 }}
                 onClick={() => {
-                  if (!confirm(`删除卡组「${d.name}」？`)) return;
+                  if (!confirm(t('deck.confirmDelete', { name: d.name }))) return;
                   deleteDeck(d.id);
                   setDecks(loadDecks());
                 }}
               >
-                删除
+                {t('common.delete')}
               </button>
             </div>
           </div>
@@ -374,27 +370,27 @@ function DeckSection() {
       </div>
 
       <p className="muted" style={{ fontSize: 12 }}>
-        卡组由房主在等待室选择，开局后所有玩家生效。爆炸猫与拆解的数量由规则锁定（人数-1 与固定配比）。
+        {t('deck.note')}
       </p>
 
       <Modal
         open={!!draft}
-        title={`编辑卡组：${draft?.name ?? ''}`}
+        title={t('deck.editTitle', { name: draft?.name ?? '' })}
         onClose={() => setDraft(null)}
         footer={
           <>
             <button className="primary" onClick={saveDraft}>
-              保存卡组
+              {t('deck.save')}
             </button>
-            <button onClick={() => setDraft(null)}>取消</button>
-            {errors.length > 0 && <span className="err-text">{errors.join('；')}</span>}
+            <button onClick={() => setDraft(null)}>{t('common.cancel')}</button>
+            {errors.length > 0 && <span className="err-text">{errors.join(t('common.listSep'))}</span>}
           </>
         }
       >
         {draft && (
           <>
             <div className="field" style={{ marginBottom: 14 }}>
-              <label>卡组名称</label>
+              <label>{t('deck.name')}</label>
               <input
                 value={draft.name}
                 maxLength={20}
@@ -403,16 +399,16 @@ function DeckSection() {
             </div>
 
             <div className="h-row" style={{ marginBottom: 12 }}>
-              <span className="muted" style={{ fontSize: 13 }}>扩展包：</span>
-              <button onClick={() => addExpansion('imploding')} title="反转/改变未来/摸牌底/万能猫">
-                + 内爆扩展
+              <span className="muted" style={{ fontSize: 13 }}>{t('deck.expansions')}</span>
+              <button onClick={() => addExpansion('imploding')} title={t('deck.impTitle')}>
+                {t('deck.imploding')}
               </button>
-              <button onClick={() => addExpansion('streaking')} title="果奔猫：藏猫诈唬">
-                + 果奔扩展
+              <button onClick={() => addExpansion('streaking')} title={t('deck.strTitle')}>
+                {t('deck.streaking')}
               </button>
             </div>
 
-            <h4>内置卡数量</h4>
+            <h4>{t('deck.builtinCounts')}</h4>
             <div
               style={{
                 display: 'grid',
@@ -424,7 +420,7 @@ function DeckSection() {
               {BUILTIN_CARDS.filter((c) => c.kind === 'action' || c.kind === 'plain').map((c) => (
                 <div key={c.id} className="h-row" style={{ fontSize: 13 }}>
                   <span style={{ minWidth: 90 }}>
-                    {c.emoji} {c.name}
+                    {c.emoji} {cardName(c.id, lang)}
                   </span>
                   <input
                     type="number"
@@ -439,7 +435,7 @@ function DeckSection() {
             </div>
 
             <div className="h-row" style={{ marginBottom: 10 }}>
-              <h4 style={{ margin: 0 }}>自定义卡（最多 10 张，每卡最多 3 个效果）</h4>
+              <h4 style={{ margin: 0 }}>{t('deck.customCards')}</h4>
               <button
                 disabled={draftCards.length >= 10}
                 onClick={() =>
@@ -453,7 +449,7 @@ function DeckSection() {
                   })
                 }
               >
-                新建卡牌
+                {t('deck.newCard')}
               </button>
             </div>
             <div className="h-row">
@@ -473,12 +469,12 @@ function DeckSection() {
                       })
                     }
                   >
-                    移除
+                    {t('common.remove')}
                   </button>
                 </div>
               ))}
               {draftCards.length === 0 && (
-                <span className="muted" style={{ fontSize: 13 }}>（无自定义卡）</span>
+                <span className="muted" style={{ fontSize: 13 }}>{t('deck.noCustom')}</span>
               )}
             </div>
 
@@ -498,13 +494,13 @@ function DeckSection() {
                       style={{ width: 70 }}
                     />
                     <span className="muted" style={{ fontSize: 12 }}>
-                      {c.effects.map((e) => EFFECT_LABEL[e.type] ?? e.type).join(' + ')}
+                      {c.effects.map((e) => effectLabel(e.type, t)).join(' + ')}
                     </span>
                     <button
                       style={{ padding: '2px 10px', fontSize: 12 }}
                       onClick={() => setNewCard(c)}
                     >
-                      改
+                      {t('build.edit')}
                     </button>
                   </div>
                 ))}
@@ -517,7 +513,7 @@ function DeckSection() {
       {/* 新建/编辑自定义卡 */}
       <Modal
         open={!!newCard}
-        title="自定义卡牌"
+        title={t('card.customTitle')}
         onClose={() => setNewCard(null)}
         footer={
           <>
@@ -530,7 +526,7 @@ function DeckSection() {
                   ...newCard,
                   description:
                     newCard.description ||
-                    newCard.effects.map((e) => EFFECT_LABEL[e.type] ?? e.type).join(' + '),
+                    newCard.effects.map((e) => effectLabel(e.type, t)).join(' + '),
                 };
                 const others = draft.customCards.filter((c) => c.id !== card.id);
                 const customCards = [...others, card];
@@ -543,16 +539,16 @@ function DeckSection() {
                 setNewCard(null);
               }}
             >
-              加入卡组
+              {t('card.addToDeck')}
             </button>
-            <button onClick={() => setNewCard(null)}>取消</button>
+            <button onClick={() => setNewCard(null)}>{t('common.cancel')}</button>
           </>
         }
       >
         {newCard && (
           <>
             <div className="field">
-              <label>卡名（≤20 字）</label>
+              <label>{t('card.name')}</label>
               <input
                 value={newCard.name}
                 maxLength={20}
@@ -560,7 +556,7 @@ function DeckSection() {
               />
             </div>
             <div className="field">
-              <label>Emoji（卡面图标，可被照片皮肤替换）</label>
+              <label>{t('card.emoji')}</label>
               <input
                 value={newCard.emoji}
                 maxLength={4}
@@ -568,21 +564,21 @@ function DeckSection() {
               />
             </div>
             <div className="field">
-              <label>类型</label>
+              <label>{t('card.type')}</label>
               <select
                 value={newCard.kind}
                 onChange={(e) => setNewCard({ ...newCard, kind: e.target.value as CardDef['kind'] })}
               >
-                <option value="action">动作牌</option>
-                <option value="plain">普通猫（可组对子/三连）</option>
+                <option value="action">{t('card.kindAction')}</option>
+                <option value="plain">{t('card.kindPlain')}</option>
               </select>
             </div>
             <div className="field">
-              <label>效果（按顺序结算，最多 3 个）</label>
+              <label>{t('card.effects')}</label>
               <div className="h-row">
                 {newCard.effects.map((e, i) => (
                   <span key={i} className="tag">
-                    {EFFECT_LABEL[e.type] ?? e.type}
+                    {effectLabel(e.type, t)}
                     <button
                       className="muted"
                       style={{ padding: '0 4px', background: 'none', border: 'none', fontSize: 11 }}
@@ -615,17 +611,17 @@ function DeckSection() {
                     });
                   }}
                 >
-                  <option value="">添加效果…</option>
-                  {CUSTOM_CARD_ALLOWED_EFFECTS.map((t) => (
-                    <option key={t} value={t}>
-                      {EFFECT_LABEL[t] ?? t}
+                  <option value="">{t('card.addEffect')}</option>
+                  {CUSTOM_CARD_ALLOWED_EFFECTS.map((et) => (
+                    <option key={et} value={et}>
+                      {effectLabel(et, t)}
                     </option>
                   ))}
                 </select>
               </div>
             </div>
             <div className="field">
-              <label>描述（可留空自动生成）</label>
+              <label>{t('card.desc')}</label>
               <input
                 value={newCard.description}
                 maxLength={120}
@@ -639,7 +635,7 @@ function DeckSection() {
       {/* 卡组分享码 */}
       <Modal
         open={!!shareCode}
-        title="卡组分享码"
+        title={t('deck.shareCodeTitle')}
         onClose={() => setShareCode(null)}
         footer={
           <>
@@ -650,14 +646,14 @@ function DeckSection() {
                 setShareCode(null);
               }}
             >
-              复制并关闭
+              {t('deck.copyClose')}
             </button>
-            <button onClick={() => setShareCode(null)}>关闭</button>
+            <button onClick={() => setShareCode(null)}>{t('common.close')}</button>
           </>
         }
       >
         <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
-          把这串码发给朋友，TA 在定制工坊顶部粘贴导入即可使用你设计的卡组
+          {t('deck.shareHint')}
         </p>
         <textarea
           readOnly

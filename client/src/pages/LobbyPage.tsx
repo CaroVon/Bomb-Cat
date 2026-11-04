@@ -5,9 +5,11 @@ import { loadIdentity } from '../lib/identity';
 import { fetchLeaderboard, loadCareer, type LeaderRow } from '../lib/stats';
 import { getBestStage, startRunStage } from '../lib/run';
 import { AnimatedNumber } from '../components/AnimatedNumber';
+import { useI18n } from '../i18n';
 
 export default function LobbyPage() {
   const navigate = useNavigate();
+  const { t } = useI18n();
   const game = useGame();
   const identity = loadIdentity();
   const [code, setCode] = useState('');
@@ -50,7 +52,7 @@ export default function LobbyPage() {
 
   async function handleJoin() {
     if (code.trim().length < 3) {
-      setError('请输入 4 位房间码');
+      setError(t('lobby.codeNeeded'));
       return;
     }
     setBusy(true);
@@ -70,7 +72,7 @@ export default function LobbyPage() {
     const ok = await autoReconnect();
     setBusy(false);
     if (ok) navigate('/game');
-    else setError('重连失败，房间可能已解散');
+    else setError(t('lobby.reconnectFail'));
   }
 
   async function handlePractice() {
@@ -102,16 +104,16 @@ export default function LobbyPage() {
   return (
     <div className="page page-lobby">
       <div className="h-row" style={{ marginBottom: 20 }}>
-        <span className="title">游戏大厅</span>
-        <span className="tag">你好，{identity?.name}</span>
+        <span className="title">{t('lobby.title')}</span>
+        <span className="tag">{t('lobby.hello', { name: identity?.name ?? '' })}</span>
       </div>
 
       {game.reconnectHint && (
         <div className="panel" style={{ marginBottom: 16, borderColor: 'var(--danger)' }}>
           <div className="h-row">
-            <span>检测到中断的对局</span>
+            <span>{t('lobby.interrupted')}</span>
             <button className="danger" onClick={handleReconnect} disabled={busy}>
-              重新连接
+              {t('lobby.reconnect')}
             </button>
           </div>
         </div>
@@ -122,26 +124,26 @@ export default function LobbyPage() {
         style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}
       >
         <div className="panel">
-          <h3 style={{ marginTop: 0 }}>创建房间</h3>
+          <h3 style={{ marginTop: 0 }}>{t('lobby.create')}</h3>
           <p className="muted" style={{ fontSize: 13, lineHeight: 1.7 }}>
-            成为房主，获得 4 位房间码，最多可邀请 7 位朋友同场对战。
+            {t('lobby.createDesc')}
           </p>
           <button className="primary" onClick={handleCreate} disabled={busy}>
-            创建房间
+            {t('lobby.create')}
           </button>
         </div>
 
         <div className="panel">
-          <h3 style={{ marginTop: 0 }}>单人 & 匹配</h3>
+          <h3 style={{ marginTop: 0 }}>{t('lobby.solo')}</h3>
           <p className="muted" style={{ fontSize: 13, lineHeight: 1.7 }}>
-            和两个 AI 猫咪即刻开局练手；或匹配其他玩家（15 秒凑不齐自动补 AI）。
+            {t('lobby.soloDesc')}
           </p>
           <div className="h-row">
             <button onClick={handlePractice} disabled={busy}>
-              🤖 人机练习
+              {t('lobby.practice')}
             </button>
             <button onClick={handleQuick} disabled={busy}>
-              ⚡ 快速匹配
+              {t('lobby.quick')}
             </button>
           </div>
           <div className="h-row" style={{ marginTop: 10 }}>
@@ -161,26 +163,26 @@ export default function LobbyPage() {
               }}
               disabled={busy}
             >
-              🔥 无尽挑战（Roguelike）
+              {t('lobby.run')}
             </button>
             {getBestStage() > 0 && (
-              <span className="tag">历史最佳：第 {getBestStage()} 关</span>
+              <span className="tag">{t('lobby.bestStage', { n: getBestStage() })}</span>
             )}
           </div>
         </div>
 
         <div className="panel">
-          <h3 style={{ marginTop: 0 }}>加入房间</h3>
+          <h3 style={{ marginTop: 0 }}>{t('lobby.join')}</h3>
           <div className="h-row" style={{ margin: '12px 0' }}>
             <input
               value={code}
               onChange={(e) => setCode(e.target.value.toUpperCase())}
               maxLength={4}
-              placeholder="房间码"
+              placeholder={t('lobby.codePh')}
               style={{ width: 140, letterSpacing: 6, textAlign: 'center', fontSize: 20 }}
             />
             <button onClick={handleJoin} disabled={busy}>
-              加入
+              {t('lobby.joinBtn')}
             </button>
           </div>
           {error && <div className="err-text">{error}</div>}
@@ -192,13 +194,11 @@ export default function LobbyPage() {
       </div>
 
       <div className="panel" style={{ marginTop: 16 }}>
-        <h3 style={{ marginTop: 0 }}>玩法速览</h3>
+        <h3 style={{ marginTop: 0 }}>{t('lobby.howTo')}</h3>
         <p className="muted" style={{ fontSize: 13, lineHeight: 2 }}>
-          轮到你时可以出任意数量的牌，然后摸一张牌结束回合。牌堆里混着爆炸猫——摸到它而没有拆解，你就出局了！
+          {t('lobby.howTo1')}
           <br />
-          攻击⚡让对方连走两回合；跳过🚫免摸牌；求赠🎁偷牌；否认❌可以否定别人刚打出的牌（8 秒窗口内）；
-          两张同名普通猫偷随机牌，三张指名偷牌；万能猫🐈‍⬛可通配组合；果奔猫🐱‍💨能把爆炸猫藏进手牌。
-          选个角色，用专属技能整活吧。
+          {t('lobby.howTo2')}
         </p>
       </div>
     </div>
@@ -208,6 +208,7 @@ export default function LobbyPage() {
 /* ==================== 战绩 / 排行榜 ==================== */
 
 function CareerPanel() {
+  const { t } = useI18n();
   const career = loadCareer();
   const [board, setBoard] = useState<LeaderRow[] | null | 'loading'>('loading');
 
@@ -225,38 +226,38 @@ function CareerPanel() {
 
   return (
     <>
-      <h3 style={{ marginTop: 0, marginBottom: 10 }}>📊 我的战绩</h3>
+      <h3 style={{ marginTop: 0, marginBottom: 10 }}>{t('career.title')}</h3>
       <div className="h-row" style={{ gap: 22 }}>
         <span>
           <strong style={{ fontSize: 22, color: 'var(--gold)' }}><AnimatedNumber value={career.points} /></strong>
-          <span className="muted" style={{ fontSize: 12 }}> 积分</span>
+          <span className="muted" style={{ fontSize: 12 }}> {t('career.points')}</span>
         </span>
         <span>
           <strong style={{ fontSize: 22 }}><AnimatedNumber value={career.games} /></strong>
-          <span className="muted" style={{ fontSize: 12 }}> 局</span>
+          <span className="muted" style={{ fontSize: 12 }}> {t('career.games')}</span>
         </span>
         <span>
           <strong style={{ fontSize: 22 }}>{career.wins}</strong>
-          <span className="muted" style={{ fontSize: 12 }}> 胜（{winRate}%）</span>
+          <span className="muted" style={{ fontSize: 12 }}> {t('career.wins', { rate: winRate })}</span>
         </span>
         {Object.entries(career.places)
           .sort((a, b) => Number(a[0]) - Number(b[0]))
           .map(([place, n]) => (
             <span key={place} className="tag">
-              第 {place} 名 ×{n}
+              {t('career.place', { place, n })}
             </span>
           ))}
       </div>
 
-      <h3 style={{ margin: '16px 0 8px' }}>🏆 排行榜{board === null ? '（未连接云端）' : ''}</h3>
-      {board === 'loading' && <p className="muted" style={{ fontSize: 13 }}>加载中……</p>}
+      <h3 style={{ margin: '16px 0 8px' }}>{t('career.board')}{board === null ? t('career.offline') : ''}</h3>
+      {board === 'loading' && <p className="muted" style={{ fontSize: 13 }}>{t('common.loading')}</p>}
       {board === null && (
         <p className="muted" style={{ fontSize: 13 }}>
-          配置 Supabase 后可与朋友共享云端排行（见 supabase/README.md）；当前仅本地统计。
+          {t('career.noCloud')}
         </p>
       )}
       {Array.isArray(board) && board.length === 0 && (
-        <p className="muted" style={{ fontSize: 13 }}>还没有云端对局记录，先来一局？</p>
+        <p className="muted" style={{ fontSize: 13 }}>{t('career.empty')}</p>
       )}
       {Array.isArray(board) && board.length > 0 && (
         <div style={{ lineHeight: 2 }}>
@@ -269,7 +270,7 @@ function CareerPanel() {
                 {row.name}
               </span>
               <span className="muted" style={{ fontSize: 12 }}>
-                {row.wins} 胜 / {row.games} 局 · <strong style={{ color: 'var(--gold)' }}>{row.points} 分</strong>
+                {t('career.row', { wins: row.wins, games: row.games })} · <strong style={{ color: 'var(--gold)' }}>{t('career.rowPts', { n: row.points })}</strong>
               </span>
             </div>
           ))}

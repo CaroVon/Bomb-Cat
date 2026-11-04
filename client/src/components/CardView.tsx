@@ -1,5 +1,6 @@
 import { memo } from 'react';
-import type { CardDef } from '@bombcat/shared';
+import { cardText, type CardDef } from '@bombcat/shared';
+import { useI18n } from '../i18n';
 
 export type CardSize = 'hand' | 'stage' | 'mini' | 'tiny';
 
@@ -42,6 +43,7 @@ function CardViewInner({
   style,
   masked,
 }: Props) {
+  const { lang, t } = useI18n();
   if (faceDown || !def) {
     return (
       <div
@@ -67,6 +69,7 @@ function CardViewInner({
   const skinUrl = skin || defaultSkin;
   const frame = masked ? BANANA_FRAME : (KIND_FRAME[def.kind] ?? KIND_FRAME.action!);
   const bananaSkin = '/assets/characters/angry_banana.jpg';
+  const text = cardText(def, lang);
 
   return (
     <div
@@ -85,13 +88,13 @@ function CardViewInner({
         ...(masked ? { ['--skin' as string]: `url(${bananaSkin})` } : {}),
         ...style,
       }}
-      title={masked ? '🍌 大香蕉之怒覆盖中……' : def.description}
+      title={masked ? t('card.maskedTitle') : text.description}
     >
       <div className="pcard-face">
         <div className="pcard-art">
           <span className="pcard-emoji">{masked ? '🍌' : def.emoji}</span>
         </div>
-        <div className="pcard-name">{masked ? '香蕉' : def.name}</div>
+        <div className="pcard-name">{masked ? t('card.maskedName') : text.name}</div>
       </div>
     </div>
   );

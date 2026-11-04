@@ -7,6 +7,8 @@ import {
   validateDeck,
   WORLD_RULE_MAP,
   BUILTIN_CARD_MAP,
+  formatMsg,
+  type LocMsg,
   type ClientMessage,
   type DeckDef,
   type HandCard,
@@ -92,7 +94,8 @@ export class GameRoom extends Room<{ state: GameState }> {
       try {
         this.handleAction(client, message);
       } catch (e) {
-        this.sendError(client, e instanceof Error ? e.message : '服务器内部错误');
+        if (e instanceof Error) this.sendError(client, 'room.errorRaw', { text: e.message });
+        else this.sendError(client, 'room.internalError');
       }
     });
 
@@ -435,12 +438,12 @@ export class GameRoom extends Room<{ state: GameState }> {
       }
       case 'setBuild': {
         if (this.engine.phase !== 'lobby') {
-          this.sendPrivate(sid, { action: 'error', message: '对局已开始' });
+          this.sendRoomError(sid, 'room.gameStarted');
           break;
         }
         const v = validateBuild(message.cardIds, this.buildCardPool());
         if (!v.ok) {
-          this.sendPrivate(sid, { action: 'error', message: `构筑不合法：${v.error}` });
+          this.sendRoomError(sid, 'room.buildInvalid', { error: v.error ?? '' });
           break;
         }
         this.pendingBuilds[sid] = message.cardIds;
@@ -453,11 +456,11 @@ export class GameRoom extends Room<{ state: GameState }> {
       }
       case 'setDeck': {
         if (sid !== this.engine.hostSessionId) {
-          this.sendPrivate(sid, { action: 'error', message: '只有房主能设置卡组' });
+          this.sendRoomError(sid, 'room.hostOnlyDeck');
           break;
         }
         if (this.engine.phase !== 'lobby') {
-          this.sendPrivate(sid, { action: 'error', message: '对局已开始' });
+          this.sendRoomError(sid, 'room.gameStarted');
           break;
         }
         if (message.deck === null) {
@@ -467,7 +470,7 @@ export class GameRoom extends Room<{ state: GameState }> {
         }
         const size = JSON.stringify(message.deck).length;
         if (size > 64 * 1024) {
-          this.sendPrivate(sid, { action: 'error', message: '卡组数据过大' });
+          this.sendRoomError(sid, 'room.deckTooLarge');
           break;
         }
         const result = validateDeck(
@@ -475,10 +478,7 @@ export class GameRoom extends Room<{ state: GameState }> {
           Math.max(MIN_PLAYERS, this.engine.players.length),
         );
         if (!result.ok) {
-          this.sendPrivate(sid, {
-            action: 'error',
-            message: `卡组不合法：${result.errors.join('；')}`,
-          });
+          this.sendRoomError(sid, 'room.deckInvalid', { errors: result.errors.join('；') });
           break;
         }
         this.pendingDeck = message.deck;
@@ -588,7 +588,7 @@ export class GameRoom extends Room<{ state: GameState }> {
           this.sendPrivate(e.sessionId, e.message);
           break;
         case 'invalid':
-          this.sendPrivate(e.sessionId, { action: 'error', message: e.message });
+          this.sendPrivate(e.sessionId, { action: 'error', message: e.message, msg: e.msg });
           break;
         case 'nopeWindowOpened': {
           this.state.nopeEndsAt = Date.now() + GameRoom.nopeWindowMs;
@@ -665,8 +665,15 @@ export class GameRoom extends Room<{ state: GameState }> {
     client.send(message.action, message);
   }
 
-  private sendError(client: Client, message: string): void {
-    client.send('error', { action: 'error', message });
+  private sendError(client: Client, k: string, p?: LocMsg['p']): void {
+    const msg: LocMsg = p ? { k, p } : { k };
+    client.send('error', { action: 'error', message: formatMsg('zh', msg), msg });
+  }
+
+  /** 房间级报错：message=中文原文（兼容），msg=可本地化消息 */
+  private sendRoomError(sessionId: string, k: string, p?: LocMsg['p']): void {
+    const msg: LocMsg = p ? { k, p } : { k };
+    this.sendPrivate(sessionId, { action: 'error', message: formatMsg('zh', msg), msg });
   }
 
   /* ------------------------------------------------------------------ */
@@ -757,7 +764,8 @@ export class GameRoom extends Room<{ state: GameState }> {
     }
 
     // 日志
-    GameRoom.syncArray(s.log, e.logLines.slice(-30));
+    // 同步编码后的 LocMsg（客户端按语言渲染；旧客户端可 decodeMsg 失败时原样显示）
+    GameRoom.syncArray(s.log, e.logMsgs.slice(-30));
 
     // 玩家
     const seen = new Set<string>();

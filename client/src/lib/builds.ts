@@ -2,6 +2,7 @@ import { BUILD_SIZE, validateBuild, type CardDef } from '@bombcat/shared';
 import { BUILTIN_CARD_MAP } from '@bombcat/shared';
 import { supabase } from './supabase';
 import { loadDecks } from './decks';
+import { tr } from '../i18n';
 
 /**
  * 个人出战构筑（与"卡组"不同：卡组是全桌牌表，构筑是"我是谁/我带什么"的玩家身份）。
@@ -69,7 +70,7 @@ export function localCardPool(): Map<string, CardDef> {
 
 export function validateBuildLocally(cards: string[]): string | null {
   const r = validateBuild(cards, localCardPool());
-  return r.ok ? null : (r.error ?? '构筑不合法');
+  return r.ok ? null : (r.error ?? tr('build.invalid'));
 }
 
 async function syncToCloud(build: PersonalBuild): Promise<void> {

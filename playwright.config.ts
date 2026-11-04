@@ -8,6 +8,8 @@ export default defineConfig({
   reporter: [['list']],
   use: {
     baseURL: 'http://localhost:5173',
+    // 客户端按浏览器语言选择中/英；E2E 用例按中文按钮名定位，固定中文 locale
+    locale: 'zh-CN',
     trace: 'off',
   },
   webServer: [

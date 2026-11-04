@@ -2,6 +2,7 @@ import { RUN_BONUSES, type RunBonusId } from '@bombcat/shared';
 import { createRoom } from './game';
 import { getActiveBuild } from './builds';
 import { sendAct } from './game';
+import { tr } from '../i18n';
 
 /**
  * 无尽挑战（Run Mode）：单人 roguelike 编排层。
@@ -46,7 +47,7 @@ export async function startRunStage(
   bonuses: RunBonusId[],
 ): Promise<void> {
   const extraExploding = Math.floor((stage - 1) / 2); // 每 2 关 +1 爆炸猫
-  await createRoom('挑战者', {
+  await createRoom(tr('run.challenger'), {
     run: true,
     runBonuses: bonuses,
     extraExploding,

@@ -5,8 +5,11 @@ import {
   BUILD_SIZE,
   OBJECTIVES,
   WORLD_RULES,
+  objectiveText,
+  worldRuleText,
   type CardDef,
 } from '@bombcat/shared';
+import { useI18n } from '../i18n';
 import {
   deleteBuild,
   getActiveBuildId,
@@ -24,6 +27,7 @@ import { CardView } from '../components/CardView';
  * 同卡 ≤2 张；卡池 = 内置动作/普通猫 + 我的自定义卡。
  */
 export function BuildSection() {
+  const { t } = useI18n();
   const [builds, setBuilds] = useState(loadBuilds);
   const [active, setActive] = useState(getActiveBuildId());
   const [editing, setEditing] = useState<string[] | null>(null);
@@ -58,12 +62,12 @@ export function BuildSection() {
   function doSave(): void {
     if (!editing) return;
     if (editing.length !== BUILD_SIZE) {
-      setError(`还差 ${BUILD_SIZE - editing.length} 张（构筑必须恰好 ${BUILD_SIZE} 张）`);
+      setError(t('build.short', { n: BUILD_SIZE - editing.length, size: BUILD_SIZE }));
       return;
     }
     const build: PersonalBuild = {
       id: `build-${Date.now()}`,
-      name: name.trim() || `构筑 ${builds.length + 1}`,
+      name: name.trim() || t('build.defaultName', { n: builds.length + 1 }),
       cards: editing,
     };
     const err = saveBuild(build);
@@ -79,7 +83,7 @@ export function BuildSection() {
   return (
     <div className="panel" style={{ marginBottom: 20 }}>
       <div className="h-row" style={{ marginBottom: 12 }}>
-        <h3 style={{ margin: 0 }}>🎴 出战构筑</h3>
+        <h3 style={{ margin: 0 }}>{t('build.title')}</h3>
         <button
           className="primary"
           onClick={() => {
@@ -88,21 +92,21 @@ export function BuildSection() {
             setError('');
           }}
         >
-          新建构筑
+          {t('build.new')}
         </button>
       </div>
       <p className="muted" style={{ fontSize: 13, marginTop: -4 }}>
-        选 {BUILD_SIZE} 张牌带入游戏：6 张随机进入你的起手（构筑身份），4 张洗入公共牌堆影响全局。等待室选用后开局生效。
+        {t('build.desc', { size: BUILD_SIZE })}
       </p>
 
       {/* 我的构筑列表 */}
       <div className="h-row" style={{ marginBottom: 12 }}>
-        {builds.length === 0 && <span className="muted" style={{ fontSize: 13 }}>还没有构筑</span>}
+        {builds.length === 0 && <span className="muted" style={{ fontSize: 13 }}>{t('build.none')}</span>}
         {builds.map((b) => (
           <div key={b.id} className="char-card" style={{ minWidth: 160 }}>
             <h4 style={{ margin: '0 0 4px' }}>{b.name}</h4>
             <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>
-              {b.cards.length} 张
+              {t('build.cards', { n: b.cards.length })}
             </div>
             <div className="h-row">
               <button
@@ -113,7 +117,7 @@ export function BuildSection() {
                   setActive(b.id);
                 }}
               >
-                {active === b.id ? '使用中' : '启用'}
+                {active === b.id ? t('build.inUse') : t('build.use')}
               </button>
               <button
                 style={{ padding: '5px 10px', fontSize: 12 }}
@@ -122,7 +126,7 @@ export function BuildSection() {
                   setName(b.name);
                 }}
               >
-                改
+                {t('build.edit')}
               </button>
               <button
                 style={{ padding: '5px 10px', fontSize: 12 }}
@@ -132,7 +136,7 @@ export function BuildSection() {
                   setActive(getActiveBuildId());
                 }}
               >
-                删
+                {t('build.delete')}
               </button>
             </div>
           </div>
@@ -146,7 +150,7 @@ export function BuildSection() {
             <input
               value={name}
               maxLength={16}
-              placeholder="构筑名称"
+              placeholder={t('build.namePh')}
               onChange={(e) => setName(e.target.value)}
               style={{ width: 160 }}
             />
@@ -155,9 +159,9 @@ export function BuildSection() {
             </span>
             <span style={{ flex: 1 }} />
             <button className="primary" onClick={doSave}>
-              保存构筑
+              {t('build.save')}
             </button>
-            <button onClick={() => setEditing(null)}>取消</button>
+            <button onClick={() => setEditing(null)}>{t('common.cancel')}</button>
           </div>
           {error && <div className="err-text">{error}</div>}
 
@@ -199,25 +203,26 @@ export function BuildSection() {
 
 /** 规则图鉴（教育性展示：让玩家开局前了解 World Rule 池） */
 export function RulesCodex() {
+  const { lang, t } = useI18n();
   return (
     <div className="panel" style={{ marginBottom: 20 }}>
-      <h3 style={{ margin: '0 0 8px' }}>🎲 本局规则池（每局随机一条）</h3>
+      <h3 style={{ margin: '0 0 8px' }}>{t('codex.rules')}</h3>
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
         {WORLD_RULES.map((r) => (
           <div key={r.id} className="char-card" style={{ cursor: 'default' }}>
             <span style={{ fontSize: 26 }}>{r.emoji}</span>
-            <h4 style={{ margin: '6px 0 2px' }}>{r.name}</h4>
-            <p style={{ margin: 0 }}>{r.description}</p>
+            <h4 style={{ margin: '6px 0 2px' }}>{worldRuleText(r.id, lang)?.name ?? r.name}</h4>
+            <p style={{ margin: 0 }}>{worldRuleText(r.id, lang)?.description ?? r.description}</p>
           </div>
         ))}
       </div>
-      <h3 style={{ margin: '16px 0 8px' }}>🎯 秘密任务池（每人随机一条，达成 +50 分）</h3>
+      <h3 style={{ margin: '16px 0 8px' }}>{t('codex.objectives')}</h3>
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
         {OBJECTIVES.map((o) => (
           <div key={o.id} className="char-card" style={{ cursor: 'default' }}>
             <span style={{ fontSize: 26 }}>{o.emoji}</span>
-            <h4 style={{ margin: '6px 0 2px' }}>{o.name}</h4>
-            <p style={{ margin: 0 }}>{o.description}</p>
+            <h4 style={{ margin: '6px 0 2px' }}>{objectiveText(o.id, lang)?.name ?? o.name}</h4>
+            <p style={{ margin: 0 }}>{objectiveText(o.id, lang)?.description ?? o.description}</p>
           </div>
         ))}
       </div>

@@ -3,3 +3,4 @@ export * from './cards';
 export * from './characters';
 export * from './validation';
 export * from './rules';
+export * from './i18n';

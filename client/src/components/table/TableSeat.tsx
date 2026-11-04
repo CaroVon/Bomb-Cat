@@ -1,7 +1,8 @@
 import { memo, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { BUILTIN_CHARACTER_MAP, CHARACTER_RPG } from '@bombcat/shared';
+import { BUILTIN_CHARACTER_MAP, CHARACTER_RPG, charText } from '@bombcat/shared';
 import { portraitUrl } from '../../lib/portraits';
+import { useI18n } from '../../i18n';
 
 export interface TableSeatData {
   sessionId: string;
@@ -103,6 +104,7 @@ function TableSeatInner({
   boneStacks,
   locked,
 }: Props) {
+  const { t, lang } = useI18n();
   const char = BUILTIN_CHARACTER_MAP.get(seat.characterId);
   const rpg = CHARACTER_RPG[seat.characterId] ?? CHARACTER_RPG['none']!;
   const themeColor = rpg.themeColor;
@@ -147,75 +149,75 @@ function TableSeatInner({
       <div className="table-seat-info">
         <span className="table-seat-name">{seat.name}</span>
         <span className="table-seat-char" style={{ color: themeColor }}>
-          {char?.name ?? '路人'}
+          {char ? charText(char, lang).name : t('table.noChar')}
         </span>
         <div className="table-seat-meta">
           {_alive ? (
             <>
-              <span title="手牌数">🂠 {_handCount}</span>
+              <span title={t('table.handCount')}>🂠 {_handCount}</span>
               {_turnsLeft > 1 && (
                 <span className="table-seat-combo">⚡{_turnsLeft}</span>
               )}
               {_digestionTurns > 0 && (
-                <span className="seat-status-badge is-digest" title="消化中">
+                <span className="seat-status-badge is-digest" title={t('table.st.digest')}>
                   🐷{_digestionTurns}
                 </span>
               )}
               {_fullTurns > 0 && (
-                <span className="seat-status-badge is-full" title="饱腹中（不能摸牌）">
+                <span className="seat-status-badge is-full" title={t('table.st.full')}>
                   🥱{_fullTurns}
                 </span>
               )}
               {_archives > 0 && (
-                <span className="seat-status-badge is-archive" title="档案：被大眼Nana监视中">
+                <span className="seat-status-badge is-archive" title={t('table.st.archive')}>
                   👁{_archives}
                 </span>
               )}
               {_freeze > 0 && (
-                <span className="seat-status-badge is-frozen" title="冰冻中（无法出牌/摸牌，且不受技能影响）">
+                <span className="seat-status-badge is-frozen" title={t('table.st.frozen')}>
                   ❄️{_freeze}
                 </span>
               )}
               {_mathSub > 0 && (
-                <span className="seat-status-badge is-mathsub" title="减法：下次摸牌少摸一张">
+                <span className="seat-status-badge is-mathsub" title={t('table.st.mathSub')}>
                   ➖{_mathSub}
                 </span>
               )}
               {_mathMul > 0 && (
-                <span className="seat-status-badge is-mathmul" title="乘法：下一张功能牌触发两次">
+                <span className="seat-status-badge is-mathmul" title={t('table.st.mathMul')}>
                   ✖️{_mathMul}
                 </span>
               )}
               {_mathDiv > 0 && (
-                <span className="seat-status-badge is-mathdiv" title="除法：下一张功能牌无法触发">
+                <span className="seat-status-badge is-mathdiv" title={t('table.st.mathDiv')}>
                   ➗{_mathDiv}
                 </span>
               )}
               {_lychees > 0 && (
-                <span className="seat-status-badge is-lychee" title="荔枝：集齐 2 颗获得一张普通小猫牌">
+                <span className="seat-status-badge is-lychee" title={t('table.st.lychee')}>
                   🍒{_lychees}
                 </span>
               )}
               {_apple > 0 && (
-                <span className="seat-status-badge is-apple" title="身上有邪恶苹果：N 回合后变成爆炸苹果混入牌堆">
+                <span className="seat-status-badge is-apple" title={t('table.st.apple')}>
                   🍏{_apple}
                 </span>
               )}
               {seat.characterId === 'butcher' && _bones > 0 && (
-                <span className="seat-status-badge is-bone" title="剔骨层数（满 3 层可封锁一名玩家）">
+                <span className="seat-status-badge is-bone" title={t('table.st.bone')}>
                   🔪{_bones}
                 </span>
               )}
               {_locked && (
-                <span className="seat-status-badge is-locked" title="被屠夫封锁：直到其下一回合结束前不能用技能和功能牌">
+                <span className="seat-status-badge is-locked" title={t('table.st.locked')}>
                   🔒
                 </span>
               )}
             </>
           ) : (
-            <span className="table-seat-out">出局</span>
+            <span className="table-seat-out">{t('table.out')}</span>
           )}
-          {!_connected && _alive && <span className="table-seat-offline">掉线</span>}
+          {!_connected && _alive && <span className="table-seat-offline">{t('table.offline')}</span>}
         </div>
       </div>
 

@@ -1,3 +1,4 @@
+import type { LocMsg } from './i18n';
 /**
  * 炸弹猫共享类型定义（前后端共用）
  *
@@ -266,8 +267,8 @@ export type ServerMessage =
   | { action: 'peekHand'; playerName: string; cards: CardDef[] }
   | { action: 'alterPrompt'; cards: CardDef[] } // 请重排这 3 张
   | { action: 'promptDefuse'; deckCount: number; bananaSubstitute?: boolean } // 请选择爆炸猫放回位置（bananaSubstitute=可用4张香蕉兑换）
-  | { action: 'error'; message: string }
-  | { action: 'notice'; text: string } // 私密提示（如藏猫通知，不进公开日志语义）
+  | { action: 'error'; message: string; msg?: LocMsg } // message=中文原文（兼容）；msg=可本地化消息
+  | { action: 'notice'; text: string; msg?: LocMsg } // 私密提示（如藏猫通知，不进公开日志语义）
   | { action: 'objectiveDone'; defId: string; defName: string } // 秘密任务达成
   | { action: 'objective'; defId: string; defName: string; description: string; targetName?: string } // 秘密任务下发
   | {
@@ -280,9 +281,9 @@ export type ServerMessage =
   | { action: 'tearPrompt'; isNana: boolean; nanaName: string } // 你摸到了眼泪牌
   | { action: 'bananaRage'; playerName: string; turns: number } // Banana 发动大香蕉之怒
   | { action: 'futureRewrite'; cards: CardDef[] } // Future女王命运改写：查看顶5张
-  | { action: 'digestReady'; cardName: string; instanceId: string } // Pig King 消化完成（必须打出/丢弃的牌）
+  | { action: 'digestReady'; cardName: string; cardId?: string; instanceId: string } // Pig King 消化完成（必须打出/丢弃的牌）
   | { action: 'chaosTouch'; playerName: string } // 混沌之触激活
-  | { action: 'chaosDraw'; fromName: string; cardName: string } // 混沌之触：你被偷了一张
+  | { action: 'chaosDraw'; fromName: string; cardName: string; cardId?: string } // 混沌之触：你被偷了一张
   | {
       action: 'exposePrompt';
       targetName: string;

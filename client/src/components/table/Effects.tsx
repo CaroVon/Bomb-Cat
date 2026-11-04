@@ -1,4 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react';
+import { useI18n } from '../../i18n';
 
 /** 爆炸白闪（80ms） */
 export function FlashOverlay({ boomKey }: { boomKey: number }) {
@@ -42,6 +43,7 @@ export function TurnBanner({ text, gold }: { text: string | null; gold: boolean 
 
 /** 爆炸公告（谁炸了） */
 export function BoomBanner({ name }: { name: string | null }) {
+  const { t } = useI18n();
   return (
     <AnimatePresence>
       {name && (
@@ -55,7 +57,7 @@ export function BoomBanner({ name }: { name: string | null }) {
           style={{ pointerEvents: 'none' }}
         >
           <span className="boom-icon">💥</span>
-          <span>{name} 爆炸出局！</span>
+          <span>{t('table.boomOut', { name: name ?? '' })}</span>
         </motion.div>
       )}
     </AnimatePresence>

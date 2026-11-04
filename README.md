@@ -37,6 +37,7 @@
 - **深度定制**：📷 照片卡面皮肤包（浏览器端压缩）+ 🃏 自定义卡牌（13 种效果原语组合，服务端强校验）
 - **牌桌演出**：中央出牌舞台「谁打了什么 → 🎯谁」、目标座位金色脉冲、炉石式手牌、散乱弃牌堆、爆炸震屏+粒子、回合计时（45s 超时自动行动）、表情系统、WebAudio 合成音效、2x 动画速度
 - **公网联机一键脚本**：`scripts/cloudflare-pages.ps1` 前端托管在 Cloudflare Pages（固定网址），后端跑在本机 + 隧道；`scripts/cloudflare-dev.ps1` 则是纯隧道模式（dev/prod 双模式）
+- **中英双语**：界面、卡牌、角色、对局日志全部双语；默认跟随浏览器语言，可随时「中 / EN」切换；同一房间内每人各看各的语言
 - **移动端适配**：竖屏布局、触摸目标 ≥40px、卡牌自适应缩放
 - **用户系统**：可选 Supabase（邮箱登录/云端卡组与皮肤/战绩表），**不配置则以纯游客模式完整可玩**
 - **防作弊架构**：权威服务器；手牌永不进同步状态，看牌等私密信息点对点下发
@@ -117,6 +118,10 @@ powershell -ExecutionPolicy Bypass -File scripts\cloudflare-pages.ps1 -Rebuild #
 服务端启用 Supabase JWT 验证。不配置则纯游客模式完整可玩。
 
 ## 部署
+
+**推荐：Railway 单服务一键部署**。游戏服务器同时提供前端页面，一个网址即可游玩。在 railway.com 用 GitHub 登录 → New Project → Deploy from GitHub repo 选本仓库 → 部署完成后在 Settings → Networking 点 Generate Domain。构建/启动/健康检查已写在 `railway.json`，之后每次推送自动重新部署。
+
+其他组合：
 
 | 组件 | 推荐 | 说明 |
 |---|---|---|

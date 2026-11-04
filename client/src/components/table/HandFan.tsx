@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { CardDef } from '@bombcat/shared';
 import { CardView } from '../CardView';
+import { useI18n } from '../../i18n';
 
 export interface FanCard {
   instanceId: string;
@@ -29,6 +30,7 @@ const SPRING = { type: 'spring', stiffness: 320, damping: 28 } as const;
  * - 悬停/选中：摆正、抬起、置顶
  */
 function HandFanInner({ cards, interactive, selected, playable, onCardClick, masked, mustPlayIid }: Props) {
+  const { t } = useI18n();
   const n = cards.length;
   const mid = (n - 1) / 2;
   // 张数越多弧度越平：总张角不超过 16°（最外侧 ±8°，旋转后的外包框不越出手牌区）
@@ -65,12 +67,12 @@ function HandFanInner({ cards, interactive, selected, playable, onCardClick, mas
                 masked={masked}
                 onClick={interactive ? () => onCardClick(card) : undefined}
               />
-              {isMust && <span className="must-play-badge">🐷必出</span>}
+              {isMust && <span className="must-play-badge">🐷{t('table.mustPlay')}</span>}
             </motion.div>
           );
         })}
       </AnimatePresence>
-      {n === 0 && <div className="handfan-empty">手中空无一牌</div>}
+      {n === 0 && <div className="handfan-empty">{t('table.handEmpty')}</div>}
     </div>
   );
 }

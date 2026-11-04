@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { CardDef } from '@bombcat/shared';
 import { CardView } from '../CardView';
+import { useI18n } from '../../i18n';
 
 export interface StageShow {
   /** 唯一 id（用 lastPlayAt） */
@@ -32,6 +33,7 @@ function CountdownSeconds({ endsAt }: { endsAt: number }) {
  * 调研参数：飞入 450ms ease-out、放大 1.6x；NOPE 盖章 scale 1.6→1 rotate -6° 250ms。
  */
 export function Stage({ show }: { show: StageShow | null }) {
+  const { t } = useI18n();
   return (
     <div className="stage">
       <AnimatePresence>
@@ -62,7 +64,7 @@ export function Stage({ show }: { show: StageShow | null }) {
               ))}
             </div>
             <div className="stage-caption">
-              <span className="stage-by">{show.byName}</span> 打出
+              <span className="stage-by">{show.byName}</span> {t('table.played')}
               {show.targetName && (
                 <>
                   {' → '}

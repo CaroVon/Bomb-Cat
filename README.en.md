@@ -37,6 +37,7 @@ A web-based Exploding Kittens–style party game with online multiplayer, deep c
 - **Deep customization**: 📷 photo card skins (compressed in-browser) + 🃏 custom cards (13 effect primitives, server-validated)
 - **Table presentation**: center stage "who played what → 🎯 whom", gold pulse on targeted seats, Hearthstone-style hand fan, scattered discard pile, explosion shake + particles, turn timer (45s auto-action), emotes, WebAudio SFX, 2x animation speed
 - **One-click public play**: `scripts/cloudflare-pages.ps1` hosts the client on Cloudflare Pages (fixed URL) with the backend on this machine via a tunnel; `scripts/cloudflare-dev.ps1` is the tunnel-only mode (dev/prod)
+- **Bilingual (中文 / English)**: UI, cards, characters and game logs; follows the browser language with a 中 / EN toggle; every player in a room sees their own language
 - **Mobile friendly**: portrait layout, ≥40px touch targets, responsive card scaling
 - **User system**: optional Supabase (email auth / cloud decks & skins / stats); **fully playable as guest without any setup**
 - **Anti-cheat architecture**: authoritative server; hands never enter synced state, private info is sent point-to-point
@@ -118,6 +119,10 @@ See [supabase/README.md](supabase/README.md). Adds email auth, cloud decks/skins
 the server then validates Supabase JWTs. Without it, guest mode is fully playable.
 
 ## Deployment
+
+**Recommended: one-click Railway deploy.** The game server also serves the client, so the whole game lives at one URL. On railway.com sign in with GitHub → New Project → Deploy from GitHub repo → pick this repo → then Settings → Networking → Generate Domain. Build/start/health-check settings are in `railway.json`; every push redeploys automatically.
+
+Other setups:
 
 | Component | Suggested | Notes |
 |---|---|---|

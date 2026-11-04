@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { CardDef } from '@bombcat/shared';
 import { CardView } from '../CardView';
+import { useI18n } from '../../i18n';
 
 /* ---------------- 确定性种子随机（各端渲染一致的散乱堆） ---------------- */
 
@@ -27,11 +28,12 @@ function mulberry32(seed: number): () => number {
 
 /** 抽牌堆：整齐微差叠放 + 计数角标 */
 export function DrawPile({ count }: { count: number }) {
+  const { t } = useI18n();
   const layers = Math.min(5, Math.max(1, Math.ceil(count / 8)));
   return (
     <div className="pile-wrap">
-      <div className="pile draw-pile" title={`牌堆剩余 ${count} 张`}>
-        {count === 0 && <div className="pile-slot">空</div>}
+      <div className="pile draw-pile" title={t('table.drawPileTitle', { n: count })}>
+        {count === 0 && <div className="pile-slot">{t('table.empty')}</div>}
         {count > 0 && Array.from({ length: layers }).map((_, i) => (
           <div
             key={i}
@@ -41,7 +43,7 @@ export function DrawPile({ count }: { count: number }) {
         ))}
       </div>
       <span className="pile-count">{count}</span>
-      <span className="pile-label">牌堆</span>
+      <span className="pile-label">{t('table.drawPile')}</span>
     </div>
   );
 }
@@ -58,6 +60,7 @@ export function DiscardPile({
   total: number;
   cardMap: Map<string, CardDef>;
 }) {
+  const { t } = useI18n();
   const scattered = useMemo(() => {
     const arr = topIds.slice(-8);
     return arr.map((cardId, i) => {
@@ -75,8 +78,8 @@ export function DiscardPile({
 
   return (
     <div className="pile-wrap">
-      <div className="pile discard-pile" title={`弃牌堆共 ${total} 张`}>
-        {scattered.length === 0 && <div className="pile-slot">捨</div>}
+      <div className="pile discard-pile" title={t('table.discardPileTitle', { n: total })}>
+        {scattered.length === 0 && <div className="pile-slot">{t('table.discardSlot')}</div>}
         <AnimatePresence initial={false}>
           {scattered.map((c) => (
             <motion.div
@@ -94,7 +97,7 @@ export function DiscardPile({
         </AnimatePresence>
       </div>
       <span className="pile-count">{total}</span>
-      <span className="pile-label">弃牌堆</span>
+      <span className="pile-label">{t('table.discardPile')}</span>
     </div>
   );
 }

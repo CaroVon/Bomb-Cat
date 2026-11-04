@@ -9,6 +9,7 @@ import GamePage from './pages/GamePage';
 import EditorPage from './pages/EditorPage';
 import { unlockAudio } from './lib/sound';
 import { loadRuntimeConfig } from './lib/config';
+import { LangProvider } from './i18n';
 import './styles.css';
 import './theme.css';
 
@@ -34,7 +35,9 @@ const router = createBrowserRouter([
 void loadRuntimeConfig().finally(() => {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <RouterProvider router={router} />
+      <LangProvider>
+        <RouterProvider router={router} />
+      </LangProvider>
     </StrictMode>,
   );
 });

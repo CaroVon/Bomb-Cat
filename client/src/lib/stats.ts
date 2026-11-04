@@ -1,6 +1,7 @@
 import type { DeckDef } from '@bombcat/shared';
 import { supabase } from './supabase';
 import { loadIdentity } from './identity';
+import { tr } from '../i18n';
 
 /**
  * 积分榜（轻量方案）：
@@ -89,7 +90,7 @@ export async function fetchLeaderboard(): Promise<LeaderRow[] | null> {
     if (error) throw error;
     const agg = new Map<string, LeaderRow>();
     for (const row of (data ?? []) as { display_name: string; place: number; player_count: number }[]) {
-      const name = row.display_name || '无名氏';
+      const name = row.display_name || tr('stats.anonymous');
       const cur = agg.get(name) ?? { name, points: 0, games: 0, wins: 0 };
       cur.games += 1;
       if (row.place === 1) cur.wins += 1;

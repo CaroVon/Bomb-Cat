@@ -3,9 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { SUPABASE_ENABLED } from '../lib/config';
 import { clearIdentity, loadIdentity, rememberedName, saveIdentity } from '../lib/identity';
 import { supabase } from '../lib/supabase';
+import { useI18n } from '../i18n';
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const { t } = useI18n();
   const existing = loadIdentity();
   const [name, setName] = useState(existing?.name || rememberedName());
   const [email, setEmail] = useState('');
@@ -16,7 +18,7 @@ export default function LoginPage() {
 
   async function guestContinue() {
     if (!name.trim()) {
-      setError('先给自己起个名字');
+      setError(t('login.needName'));
       return;
     }
     saveIdentity({ name: name.trim(), mode: 'guest' });
@@ -27,7 +29,7 @@ export default function LoginPage() {
     setError('');
     setBusy(true);
     try {
-      if (!supabase) throw new Error('Supabase 未配置');
+      if (!supabase) throw new Error(t('login.noSupabase'));
       const fn =
         mode === 'login'
           ? supabase.auth.signInWithPassword({ email, password })
@@ -51,18 +53,18 @@ export default function LoginPage() {
     <div className="page page-login">
       <div className="auth-box panel">
         <div className="title" style={{ marginBottom: 4 }}>
-          💥 炸弹猫
+          💥 {t('app.title')}
         </div>
         <div className="muted" style={{ marginBottom: 18, fontSize: 14 }}>
-          联机 · 深度定制 · 和朋友的照片一起玩
+          {t('login.tagline')}
         </div>
 
         <div className="field">
-          <label>昵称（游客与登录都需要）</label>
+          <label>{t('login.nickname')}</label>
           <input
             value={name}
             maxLength={16}
-            placeholder="比如：猫王"
+            placeholder={t('login.nicknamePh')}
             onChange={(e) => setName(e.target.value)}
           />
         </div>
@@ -70,44 +72,43 @@ export default function LoginPage() {
         {SUPABASE_ENABLED ? (
           <>
             <div className="h-row" style={{ marginBottom: 12 }}>
-              <span className="tag">账号模式</span>
+              <span className="tag">{t('login.accountMode')}</span>
               <button
                 style={{ padding: '4px 12px' }}
                 onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
               >
-                {mode === 'login' ? '切换到注册' : '切换到登录'}
+                {mode === 'login' ? t('login.toRegister') : t('login.toLogin')}
               </button>
             </div>
             <div className="field">
-              <label>邮箱</label>
+              <label>{t('login.email')}</label>
               <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
             </div>
             <div className="field">
-              <label>密码</label>
+              <label>{t('login.password')}</label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="至少 6 位"
+                placeholder={t('login.passwordPh')}
               />
             </div>
             {error && <div className="err-text">{error}</div>}
             <div className="h-row" style={{ marginTop: 8 }}>
               <button className="primary" onClick={supabaseAuth} disabled={busy}>
-                {mode === 'login' ? '登录' : '注册并登录'}
+                {mode === 'login' ? t('login.login') : t('login.register')}
               </button>
-              <button onClick={guestContinue}>以游客身份进入</button>
+              <button onClick={guestContinue}>{t('login.guest')}</button>
             </div>
           </>
         ) : (
           <>
             {error && <div className="err-text">{error}</div>}
             <button className="primary" style={{ width: '100%' }} onClick={guestContinue}>
-              进入大厅
+              {t('login.enter')}
             </button>
             <p className="muted" style={{ fontSize: 12, marginTop: 14 }}>
-              当前为纯游客模式（未配置 Supabase）。配置 VITE_SUPABASE_URL /
-              VITE_SUPABASE_ANON_KEY 后可启用账号、云端卡组与照片卡面同步。
+              {t('login.guestOnly')}
             </p>
           </>
         )}
@@ -121,7 +122,7 @@ export default function LoginPage() {
               setName('');
             }}
           >
-            清除本地身份（{existing.name}）
+            {t('login.clearIdentity', { name: existing.name })}
           </button>
         )}
       </div>
