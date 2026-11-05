@@ -9,6 +9,7 @@ const PORTRAIT_EXT: Record<string, string> = {
 const PORTRAIT_FILE: Record<string, string> = {
   xiuying: 'ice',
   butcher: 'butcher2',
+  driver: 'Driver_jia',
 };
 
 export function portraitUrl(characterId: string | undefined | null): string {

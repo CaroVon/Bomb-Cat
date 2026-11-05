@@ -978,4 +978,200 @@ export const MESSAGES: Record<string, { zh: string; en: string }> = {
     zh: "{text}",
     en: "{text}",
   },
+  "log.rideAsk": {
+    zh: "🚕 {player} 邀请 {target} 上车",
+    en: "🚕 {player} invites {target} to hop in",
+  },
+  "log.rideRefused": {
+    zh: "🚕 {player} 没有上 {target} 的车",
+    en: "🚕 {player} turns down {target}'s ride",
+  },
+  "log.rideAccepted": {
+    zh: "🚕 {player} 上了 {target} 的车，付了一张牌当车费（下回合到站不用摸牌）",
+    en: "🚕 {player} hops in with {target} and pays a card as the fare (no draw at the end of their next turn)",
+  },
+  "log.rideArrive": {
+    zh: "🚕 {player} 安全到站，本回合结束不摸牌",
+    en: "🚕 {player} arrives safely and ends the turn without drawing",
+  },
+  "log.luckGain": {
+    zh: "🍀 {player} 收满车费，攒下一层「撞大运」（共 {n} 层）",
+    en: "🍀 {player} has collected enough fares — +1 Jackpot stack ({n} total)",
+  },
+  "log.luckDodge": {
+    zh: "🍀 撞大运！{player} 摸到【{card}】，一个急转弯把它甩回了牌堆（剩 {n} 层）",
+    en: "🍀 Jackpot! {player} draws [{card}] and swerves it back into the deck ({n} stacks left)",
+  },
+  "log.laneChange": {
+    zh: "🛣️ {player} 变道：{a} 和 {b} 交换了座次",
+    en: "🛣️ {player} changes lanes: {a} and {b} swap seats",
+  },
+  "err.rideCooldown": {
+    zh: "上车冷却中（剩 {n} 回合）",
+    en: "Hop In is on cooldown ({n} turns left)",
+  },
+  "err.needRideTarget": {
+    zh: "需要选择一名其他存活玩家",
+    en: "Pick another living player",
+  },
+  "err.alreadyAskedRide": {
+    zh: "本回合已经邀请过这位玩家了",
+    en: "You already asked this player this turn",
+  },
+  "err.rideFrozen": {
+    zh: "对方处于冰冻中，没法上车",
+    en: "They're frozen and can't hop in",
+  },
+  "err.rideNoCards": {
+    zh: "对方没有手牌，付不起车费",
+    en: "They have no cards to pay the fare",
+  },
+  "err.rideAlready": {
+    zh: "对方已经在车上了",
+    en: "They're already riding",
+  },
+  "err.laneCooldown": {
+    zh: "变道冷却中（剩 {n} 回合）",
+    en: "Lane Change is on cooldown ({n} turns left)",
+  },
+  "err.laneTooFew": {
+    zh: "至少需要 3 名存活玩家才能变道",
+    en: "Lane Change needs at least 3 living players",
+  },
+  "err.needLaneTarget": {
+    zh: "需要选择一名存活玩家",
+    en: "Pick a living player",
+  },
+  "log.investOpen": {
+    zh: "💼 {player} 建仓：{n} 张牌进入投资组合（{turns} 个回合后按大盘交割）",
+    en: "💼 {player} opens a position: {n} cards go into the portfolio (settles by the Market in {turns} turns)",
+  },
+  "log.marketBull": {
+    zh: "📈 牛市！大盘 {market}：{player} 拿回 {n} 张本金，另从弃牌堆收获 {bonus} 张",
+    en: "📈 Bull market! Market {market}: {player} gets the {n}-card stake back plus {bonus} cards from the discard pile",
+  },
+  "log.marketFlat": {
+    zh: "📊 震荡市，大盘 {market}：{player} 原样拿回 {n} 张本金",
+    en: "📊 Flat market at {market}: {player} gets the {n}-card stake back as is",
+  },
+  "log.marketBear": {
+    zh: "📉 熊市！大盘 {market}：{player} 的 {n} 张本金亏掉了 {lost} 张",
+    en: "📉 Bear market! Market {market}: {player} loses {lost} of the {n}-card stake",
+  },
+  "log.cashout": {
+    zh: "💼 {player} 提前平仓（大盘 {market}）：扣 1 张手续费，拿回 {n} 张",
+    en: "💼 {player} cashes out early (Market {market}): 1 card paid as a fee, {n} back to hand",
+  },
+  "log.portfolioLost": {
+    zh: "💼 {player} 出局，投资组合里的 {n} 张牌进入弃牌堆",
+    en: "💼 {player} is out — the {n} cards in the portfolio go to the discard pile",
+  },
+  "log.sheepSleep": {
+    zh: "🐑 {player} 发动「{skill}」：一只羊、两只羊……摸完牌就睡着了 💤",
+    en: "🐑 {player} uses \"{skill}\": one sheep, two sheep... draws and drifts off to sleep 💤",
+  },
+  "log.sheepWake": {
+    zh: "🐑 {player} 醒了，还记得刚才的梦……",
+    en: "🐑 {player} wakes up, still remembering the dream...",
+  },
+  "log.dreamKeep": {
+    zh: "🌙 {player} 把一个梦留给了自己",
+    en: "🌙 {player} keeps a dream card",
+  },
+  "log.dreamGive": {
+    zh: "🌙 {player} 把一个梦送给了 {target}",
+    en: "🌙 {player} gives a dream card to {target}",
+  },
+  "log.stealAsleep": {
+    zh: "💤 {player} 在梦乡里，偷牌落空了",
+    en: "💤 {player} is fast asleep — the steal fizzles",
+  },
+  "log.snooze": {
+    zh: "🛌 {player} 睡了个回笼觉：结束回合不摸牌（下次摸牌多摸 {n} 张）",
+    en: "🛌 {player} hits snooze: ends the turn without drawing (next draw takes {n} extra)",
+  },
+  "log.dreamExtraDraw": {
+    zh: "😴 {player} 的梦还没醒：这次要多摸 {n} 张",
+    en: "😴 {player}'s dreams linger: {n} extra cards on this draw",
+  },
+  "log.drawN": {
+    zh: "{player} 摸了 {n} 张牌",
+    en: "{player} draws {n} cards",
+  },
+  "log.buryBombs": {
+    zh: "🌙 {player} 造了个梦：牌堆顶 3 张里的 {n} 张爆炸牌沉到了牌堆底",
+    en: "🌙 {player} weaves a dream: {n} exploding cards from the top 3 sink to the bottom of the deck",
+  },
+  "log.nightmareShed": {
+    zh: "😱 {player} 把噩梦扔掉了",
+    en: "😱 {player} throws the nightmare away",
+  },
+  "log.fleece": {
+    zh: "🧶 {player} 盖上羊毛毯，少挨 1 个回合（需连续行动 {n} 回合）",
+    en: "🧶 {player} wraps up in the Fleece Blanket — one turn fewer ({n} turns in a row)",
+  },
+  "log.sleepwalk": {
+    zh: "🚶 {player} 在梦游中打出了【{card}】",
+    en: "🚶 {player} plays [{card}] while sleepwalking",
+  },
+  "log.sleepwalkNothing": {
+    zh: "🚶 {player} 梦游了一圈，手里没有能打的功能牌，什么也没发生",
+    en: "🚶 {player} sleepwalks around but has no action card to play — nothing happens",
+  },
+  "err.fleecePassive": {
+    zh: "羊毛毯不能主动打出，被攻击时会自动生效",
+    en: "The Fleece Blanket can't be played — it triggers automatically when you're attacked",
+  },
+  "err.sleepwalkNotPlayable": {
+    zh: "梦游不能打出",
+    en: "Sleepwalk can't be played",
+  },
+  "err.asleepNope": {
+    zh: "你在梦乡里，不能打否认 💤",
+    en: "You're asleep and can't play Nope 💤",
+  },
+  "err.noPendingDream": {
+    zh: "现在没有要选的梦",
+    en: "There's no dream to pick right now",
+  },
+  "err.notYourDream": {
+    zh: "这不是你的梦",
+    en: "That's not your dream",
+  },
+  "err.badDreamCard": {
+    zh: "只能从翻出的梦境牌里选",
+    en: "Pick one of the revealed dream cards",
+  },
+  "err.badDreamTarget": {
+    zh: "只能送给一名存活玩家",
+    en: "You can only give it to a living player",
+  },
+  "err.investCooldown": {
+    zh: "建仓冷却中（剩 {n} 回合）",
+    en: "Open Position is on cooldown ({n} turns left)",
+  },
+  "err.investHolding": {
+    zh: "已经有一笔持仓了，先交割或平仓",
+    en: "You already hold a position — settle or cash out first",
+  },
+  "err.investCount": {
+    zh: "请选择 1~{n} 张手牌建仓",
+    en: "Pick 1 to {n} cards from your hand to invest",
+  },
+  "err.investNotInHand": {
+    zh: "要投资的牌不在你手里",
+    en: "That card isn't in your hand",
+  },
+  "err.investBadCard": {
+    zh: "【{card}】不能放进投资组合",
+    en: "[{card}] can't go into the portfolio",
+  },
+  "err.noPortfolio": {
+    zh: "你现在没有持仓",
+    en: "You don't hold a position",
+  },
+  "err.sheepCooldown": {
+    zh: "数羊冷却中（剩 {n} 回合）",
+    en: "Count Sheep is on cooldown ({n} turns left)",
+  },
 };

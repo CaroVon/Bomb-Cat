@@ -9,6 +9,7 @@ import {
   WORLD_RULES,
   WORLD_RULE_MAP,
   BUILD_HAND_CARDS,
+  DREAM_CARD_IDS,
   defuseTotal,
   validateBuild,
   validateDeck,
@@ -28,6 +29,7 @@ import type {
   EnginePlayer,
   PendingAlter,
   PendingDefuse,
+  PendingDream,
   PendingHelp,
   PendingPlay,
   PlayCardInput,
@@ -138,6 +140,20 @@ export class GameEngine {
   private pendingExpose: { sessionId: string; targetSessionId: string; mode: 'discard' | 'steal' } | null = null;
   /** 秀英求助：等待被求助者回应（提交 helpRespond 或超时自动拒绝） */
   private pendingHelp: PendingHelp | null = null;
+  /** 司机小贾最近一次变道（公开：客户端据 seq 变化播放换位动画） */
+  laneSwap: { a: string; b: string; seq: number } | null = null;
+  /** 懒懒羊醒来：等待选梦境牌（提交 dreamPick 或超时自动留下第一张） */
+  private pendingDream: PendingDream | null = null;
+
+  /** 懒懒羊选梦挂起中（房间层据此暂停回合计时） */
+  get dreamPending(): boolean {
+    return this.pendingDream !== null;
+  }
+
+  /** 当前选梦信息（房间层 / AI 用） */
+  get pendingDreamInfo(): PendingDream | null {
+    return this.pendingDream;
+  }
 
   /** 命运改写是否挂起中（房间层据此暂停回合计时，给玩家思考时间） */
   get futureRewritePending(): boolean {
@@ -273,6 +289,7 @@ export class GameEngine {
         p.alive &&
         p.sessionId !== playSessionId &&
         !this.isLocked(p) &&
+        !p.asleep &&
         p.hand.some((c) => c.cardId === 'nope'),
     );
   }
@@ -326,6 +343,16 @@ export class GameEngine {
       boneStacks: 0,
       butcherTargetCd: {},
       lockedBy: '',
+      fares: 0,
+      luckCharges: 0,
+      freeRide: false,
+      askedRide: [],
+      portfolio: [],
+      portfolioTurns: 0,
+      market: 0,
+      asleep: false,
+      sleepwalk: false,
+      deferredDraw: 0,
     };
     this.players.push(player);
     if (!this.hostSessionId) this.hostSessionId = sessionId;
@@ -480,6 +507,16 @@ export class GameEngine {
       p.boneStacks = 0;
       p.butcherTargetCd = {};
       p.lockedBy = '';
+      p.fares = 0;
+      p.luckCharges = 0;
+      p.freeRide = false;
+      p.askedRide = [];
+      p.portfolio = [];
+      p.portfolioTurns = 0;
+      p.market = 0;
+      p.asleep = false;
+      p.sleepwalk = false;
+      p.deferredDraw = 0;
 
       // Nana：开局没有拆解
       if (p.characterId === 'nana') {
@@ -509,6 +546,7 @@ export class GameEngine {
     this.pendingFutureRewrite = null;
     this.pendingExpose = null;
     this.pendingHelp = null;
+    this.pendingDream = null;
 
     // World Rule 防爆过剩：额外 2 张拆解
     if (this.worldRuleId === 'defuse-plenty') {
@@ -679,11 +717,18 @@ export class GameEngine {
       if ((input.comboInstanceIds ?? []).length > 0) {
         return this.invalid(sessionId, 'err.overlayNoCombo');
       }
-      if (def.kind === 'plain' || def.kind === 'defuse' || instance.cardId === 'nope') {
+      if (
+        def.kind === 'plain' ||
+        def.kind === 'defuse' ||
+        instance.cardId === 'nope' ||
+        instance.cardId === 'dream-fleece' ||
+        instance.cardId === 'dream-sleepwalk'
+      ) {
         player.hand = player.hand.filter((c) => c.iid !== instance.iid);
         if (player.mustPlayIid === instance.iid) player.mustPlayIid = null;
         this.discard.push(instance);
         const events: EngineEvent[] = [{ type: 'hand', sessionId }];
+        this.marketTick([instance]);
         this.log(events, 'log.blindBanana', { player: player.name, card: this.cardRef(instance.cardId) });
         this.lastPlay = {
           playId: `blind-${++instanceSeq}`,
@@ -702,6 +747,9 @@ export class GameEngine {
     if (instance.cardId === 'nope') return this.invalid(sessionId, 'err.nopeWindowOnly');
     if (def.kind === 'exploding') return this.invalid(sessionId, 'err.explodingNotPlayable');
     if (def.kind === 'tear') return this.invalid(sessionId, 'err.tearNotPlayable');
+    // 懒懒羊梦境牌：羊毛毯只能被动生效；梦游不进手牌（防御性拦截）
+    if (instance.cardId === 'dream-fleece') return this.invalid(sessionId, 'err.fleecePassive');
+    if (instance.cardId === 'dream-sleepwalk') return this.invalid(sessionId, 'err.sleepwalkNotPlayable');
 
     let combo: PendingPlay['combo'] = 'single';
     let instances: CardInstance[] = [instance];
@@ -795,6 +843,7 @@ export class GameEngine {
         player.mustPlayIid = null;
       }
       this.discard.push(...instances);
+      this.marketTick(instances);
       const events: EngineEvent[] = [{ type: 'hand', sessionId }];
       const names = this.cardsRef(instances.map((i) => i.cardId));
       this.log(events, 'log.playDivided', { player: player.name, cards: names });
@@ -853,6 +902,10 @@ export class GameEngine {
     if (suppressApplied) {
       this.log(events, 'log.suppressSteal', { cards: cardNames, target: targetName ?? '' });
     }
+    if (instance.cardId === 'dream-nightmare') {
+      this.log(events, 'log.nightmareShed', { player: player.name });
+    }
+    this.marketTick(instances);
     // 秀英冰冻：被功能牌指定 → 冰冻 -1（卡牌效果照常生效）
     if (needsTarget) {
       this.cardHitsFrozen(
@@ -905,11 +958,13 @@ export class GameEngine {
       return this.invalid(sessionId, 'err.nopeNeedOther');
     }
     if (this.isLocked(player)) return this.invalid(sessionId, 'err.lockedNope');
+    if (player.asleep) return this.invalid(sessionId, 'err.asleepNope');
     const instance = player.hand.find((c) => c.iid === instanceId && c.cardId === 'nope');
     if (!instance) return this.invalid(sessionId, 'err.noNopeCard');
 
     player.hand = player.hand.filter((c) => c.iid !== instanceId);
     this.discard.push(instance);
+    this.bumpMarket(-1);
     pending.nopedBy.push(sessionId);
     const noped = pending.nopedBy.length % 2 === 1;
     const owner = this.players.find((p) => p.sessionId === pending.sessionId);
@@ -960,7 +1015,7 @@ export class GameEngine {
     this.discard.push(...pending.instances);
     this.queue = { play: pending, effects: pending.effects, index: 0 };
     this.endTurnAfterEffects = pending.effects.some(
-      (e) => e.type === 'skip' || e.type === 'attack' || e.type === 'drawFromBottom',
+      (e) => e.type === 'skip' || e.type === 'attack' || e.type === 'drawFromBottom' || e.type === 'snooze',
     );
     const bottomDraws = pending.effects
       .filter((e) => e.type === 'drawFromBottom')
@@ -1091,6 +1146,11 @@ export class GameEngine {
           else this.log(events, 'log.stealNoTarget');
           return 'ok';
         }
+        // 懒懒羊梦乡：偷牌落空（牌照常打出）
+        if (target.asleep) {
+          this.log(events, 'log.stealAsleep', { player: target.name });
+          return 'ok';
+        }
         if (this.tryImmuneSteal(target, events)) return 'ok';
 
         let idx: number;
@@ -1168,8 +1228,118 @@ export class GameEngine {
         return 'ok';
       }
 
+      case 'snooze': {
+        // 回笼觉：本回合结束不摸牌（finishTurn 统一收尾），下一次摸牌多摸 1 张
+        player.deferredDraw += 1;
+        this.log(events, 'log.snooze', { player: player.name, n: player.deferredDraw });
+        return 'ok';
+      }
+
+      case 'bombSense': {
+        const n = Math.min(effect.count ?? 5, this.deck.length);
+        const positions: number[] = [];
+        for (let i = 0; i < n; i++) {
+          if (this.isExploding(this.deck[this.deck.length - 1 - i]!)) positions.push(i + 1);
+        }
+        this.ev(events, {
+          type: 'private',
+          sessionId: player.sessionId,
+          message: { action: 'bombSense', positions, checked: n },
+        });
+        return 'ok';
+      }
+
+      case 'buryBombs': {
+        const n = Math.min(effect.count ?? 3, this.deck.length);
+        const top = this.deck.splice(this.deck.length - n, n);
+        const bombs = top.filter((c) => this.isExploding(c));
+        const rest = top.filter((c) => !this.isExploding(c));
+        this.deck.push(...rest);
+        this.deck.unshift(...bombs);
+        this.log(events, 'log.buryBombs', { player: player.name, n: bombs.length });
+        return 'ok';
+      }
+
       default:
         return 'ok';
+    }
+  }
+
+  /** Julia 大盘：有人持仓期间，每打出一张牌按真实类型计分（功能/梦境 +1，猫牌/否认 −1） */
+  private marketTick(instances: CardInstance[]): void {
+    let delta = 0;
+    for (const c of instances) {
+      const kind = this.cardMap.get(c.cardId)?.kind;
+      if (c.cardId === 'nope' || kind === 'plain') delta--;
+      else if (kind === 'action' || kind === 'dream') delta++;
+    }
+    if (delta !== 0) this.bumpMarket(delta);
+  }
+
+  private bumpMarket(delta: number): void {
+    if (this.phase !== 'playing') return;
+    for (const p of this.players) {
+      if (p.portfolio.length === 0) continue;
+      p.market = Math.max(-99, Math.min(99, p.market + delta));
+    }
+  }
+
+  /** Julia：私发投资组合内容（空数组 = 已清仓） */
+  private sendPortfolio(player: EnginePlayer, events: EngineEvent[]): void {
+    this.ev(events, {
+      type: 'private',
+      sessionId: player.sessionId,
+      message: { action: 'portfolio', cards: player.portfolio.map((c) => this.defOf(c)) },
+    });
+  }
+
+  private clearPortfolio(player: EnginePlayer, events: EngineEvent[]): void {
+    player.portfolio = [];
+    player.portfolioTurns = 0;
+    player.market = 0;
+    this.sendPortfolio(player, events);
+  }
+
+  /** Julia 自动交割（回合开始，无视封锁） */
+  private settlePortfolio(player: EnginePlayer, events: EngineEvent[]): void {
+    const stake = player.portfolio;
+    const k = stake.length;
+    const market = player.market;
+    if (market >= 2) {
+      const pool = this.discard.filter((c) => !this.isExploding(c));
+      const bonus = this.pickRandomFrom(pool, k);
+      const bonusSet = new Set(bonus.map((c) => c.iid));
+      this.discard = this.discard.filter((c) => !bonusSet.has(c.iid));
+      player.hand.push(...stake, ...bonus);
+      this.log(events, 'log.marketBull', { player: player.name, market, n: k, bonus: bonus.length });
+    } else if (market <= -2) {
+      const lost = this.pickRandomFrom(stake, Math.ceil(k / 2));
+      const lostSet = new Set(lost.map((c) => c.iid));
+      this.discard.push(...lost);
+      player.hand.push(...stake.filter((c) => !lostSet.has(c.iid)));
+      this.log(events, 'log.marketBear', { player: player.name, market, n: k, lost: lost.length });
+    } else {
+      player.hand.push(...stake);
+      this.log(events, 'log.marketFlat', { player: player.name, market, n: k });
+    }
+    this.ev(events, { type: 'hand', sessionId: player.sessionId });
+    this.clearPortfolio(player, events);
+  }
+
+  /** 出局时清理 v7 状态：投资组合进弃牌堆，梦乡/梦游作废 */
+  private onEliminated(player: EnginePlayer, events: EngineEvent[]): void {
+    if (player.portfolio.length > 0) {
+      this.discard.push(...player.portfolio);
+      this.log(events, 'log.portfolioLost', { player: player.name, n: player.portfolio.length });
+      this.clearPortfolio(player, events);
+    }
+    player.asleep = false;
+    player.sleepwalk = false;
+    player.deferredDraw = 0;
+    if (this.pendingDream?.sessionId === player.sessionId) {
+      this.pendingDream = null;
+      if (this.subPhase === 'awaiting-dream') this.subPhase = 'awaiting-action';
+      this.ev(events, { type: 'dreamResolved' });
     }
   }
 
@@ -1379,6 +1549,13 @@ export class GameEngine {
       return this.finishTurn(events);
     }
 
+    // 司机小贾的乘客：安全到站，本回合结束不摸牌（只抵一个回合）
+    if (player.freeRide) {
+      player.freeRide = false;
+      this.log(events, 'log.rideArrive', { player: player.name });
+      return this.finishTurn(events);
+    }
+
     // 秀英冰冻：无法出牌和摸牌，直接结束回合
     if (this.isFrozen(player)) {
       this.log(events, 'log.frozenSkipDraw', { player: player.name, n: player.freezeLayers });
@@ -1388,6 +1565,15 @@ export class GameEngine {
     // Pig King 暴食：每次多摸 1 张
     let draws = this.worldRuleId === 'double-down' ? 2 : 1;
     if (player.characterId === 'pig_king') draws += 1;
+
+    // 懒懒羊梦境牌：回笼觉延期的摸牌 + 手里每张噩梦多摸 1 张
+    const dreamExtra =
+      player.deferredDraw + player.hand.filter((c) => c.cardId === 'dream-nightmare').length;
+    player.deferredDraw = 0;
+    if (dreamExtra > 0) {
+      draws += dreamExtra;
+      this.log(events, 'log.dreamExtraDraw', { player: player.name, n: dreamExtra });
+    }
 
     // 数学老师减法：下一次摸牌少摸 1 张（最少 0）
     if (player.mathSubDraw > 0) {
@@ -1443,7 +1629,7 @@ export class GameEngine {
     if (this.worldRuleId === 'double-down') {
       this.log(events, 'log.doubleDown', { player: player.name });
     } else if (draws > 1) {
-      this.log(events, 'log.gluttonyDraw', { player: player.name, n: draws });
+      this.log(events, player.characterId === 'pig_king' ? 'log.gluttonyDraw' : 'log.drawN', { player: player.name, n: draws });
     } else {
       this.log(events, 'log.draw', { player: player.name });
     }
@@ -1489,6 +1675,7 @@ export class GameEngine {
         player.permanentDead = true;
         player.alive = false;
         player.hand = [];
+        this.onEliminated(player, events);
         this.deathOrder.push(player.sessionId);
         this.lastDeath = { sessionId: player.sessionId, name: player.name, at: Date.now() };
         this.log(events, 'log.tearDeath', { player: player.name });
@@ -1526,6 +1713,14 @@ export class GameEngine {
     kitten: CardInstance,
     events: EngineEvent[],
   ): 'ok' | 'suspend-defuse' {
+    // 司机小贾「撞大运」：有层数时自动把爆炸牌放回牌堆随机位置（不爆炸、不消耗拆解）
+    if (player.luckCharges > 0 && this.characterMap.get(player.characterId)?.skills.some((s) => s.effect.kind === 'driverLuck')) {
+      player.luckCharges--;
+      const pos = Math.floor(this.rng() * (this.deck.length + 1));
+      this.deck.splice(pos, 0, kitten);
+      this.log(events, 'log.luckDodge', { player: player.name, card: this.cardRef(kitten.cardId), n: player.luckCharges });
+      return 'ok';
+    }
     const defuseIdx = player.hand.findIndex((c) => c.cardId === 'defuse');
     if (defuseIdx >= 0) {
       const [defuse] = player.hand.splice(defuseIdx, 1);
@@ -1576,6 +1771,8 @@ export class GameEngine {
     this.deathOrder.push(player.sessionId);
     this.lastDeath = { sessionId: player.sessionId, name: player.name, at: Date.now() };
     this.shuffle(this.deck);
+
+    this.onEliminated(player, events);
 
     // 身上的邪恶苹果随人一起销毁（不会变成爆炸苹果）
     if (player.appleTurns > 0) {
@@ -1694,6 +1891,11 @@ export class GameEngine {
       this.pendingHelp = null;
       this.ev(events, { type: 'helpResolved' });
     }
+    if (this.pendingDream) {
+      this.pendingDream = null;
+      if (this.subPhase === 'awaiting-dream') this.subPhase = 'awaiting-action';
+      this.ev(events, { type: 'dreamResolved' });
+    }
 
     const current = this.current();
 
@@ -1748,7 +1950,17 @@ export class GameEngine {
           suppressed = true;
         }
         const base = (this.worldRuleId === 'overdrive' ? 4 : 2) * attackMult;
-        victim.turnsLeft = transfer + base;
+        let turns = transfer + base;
+        // 懒懒羊羊毛毯：被攻击时自动盖上，少连续行动 1 回合（最少 1 回合），用完弃掉
+        const fleeceIdx = victim.hand.findIndex((c) => c.cardId === 'dream-fleece');
+        if (fleeceIdx >= 0) {
+          const [fleece] = victim.hand.splice(fleeceIdx, 1);
+          this.discard.push(fleece!);
+          turns = Math.max(1, turns - 1);
+          this.ev(events, { type: 'hand', sessionId: victim.sessionId });
+          this.log(events, 'log.fleece', { player: victim.name, n: turns });
+        }
+        victim.turnsLeft = turns;
         this.turnIndex = this.turnOrder.indexOf(victim.sessionId);
         this.turnCount++;
         this.log(
@@ -1881,6 +2093,7 @@ export class GameEngine {
     player.rippleUsedThisTurn = false;
     // v3：每回合重置的互动标记（秀英求助名单 / 荔枝次数）
     player.askedHelp = [];
+    player.askedRide = [];
     player.lycheeGivenThisTurn = 0;
     player.helpedThisTurn = false;
 
@@ -1935,6 +2148,118 @@ export class GameEngine {
         });
       }
     }
+
+    // v7：Julia 持仓倒计时 → 自动交割（无视封锁）
+    if (player.portfolio.length > 0 && player.alive) {
+      player.portfolioTurns = Math.max(0, player.portfolioTurns - 1);
+      if (player.portfolioTurns <= 0) this.settlePortfolio(player, events);
+    }
+
+    // v7：懒懒羊醒来 → 选梦境牌
+    if (player.asleep) {
+      player.asleep = false;
+      if (player.alive && this.phase === 'playing') this.startDream(player, events);
+    }
+
+    // v7：梦游——自动随机打出一张功能牌（挂起中的其他交互优先，标记保留到下回合）
+    if (player.sleepwalk && player.alive && this.phase === 'playing' && this.subPhase === 'awaiting-action') {
+      player.sleepwalk = false;
+      this.runSleepwalk(player, events);
+    }
+  }
+
+  /** 懒懒羊醒来：随机翻 N 张不同的梦境牌，等待 dreamPick */
+  private startDream(player: EnginePlayer, events: EngineEvent[]): void {
+    const skill = this.characterMap.get(player.characterId)?.skills.find((s) => s.effect.kind === 'sheepDream');
+    const want = skill?.effect.kind === 'sheepDream' ? skill.effect.options : 2;
+    const pool = DREAM_CARD_IDS.filter((id) => this.cardMap.has(id));
+    const options = this.pickRandomFrom(
+      pool.map((id) => ({ iid: id, cardId: id })),
+      Math.max(1, want),
+    ).map((c) => c.cardId);
+    this.log(events, 'log.sheepWake', { player: player.name });
+    if (options.length === 0) return;
+    this.pendingDream = { sessionId: player.sessionId, options };
+    this.subPhase = 'awaiting-dream';
+    this.ev(events, {
+      type: 'private',
+      sessionId: player.sessionId,
+      message: { action: 'dreamPrompt', options: options.map((id) => this.cardMap.get(id)!) },
+    });
+    this.ev(events, { type: 'awaitingDream' });
+  }
+
+  /** 梦游：从手里随机挑一张可打出的单张功能牌（否认除外），走正常出牌流程 */
+  private runSleepwalk(player: EnginePlayer, events: EngineEvent[]): void {
+    const candidates = this.shuffle(
+      player.hand.filter((c) => this.cardMap.get(c.cardId)?.kind === 'action' && c.cardId !== 'nope'),
+    );
+    const others = this.players.filter((p) => p.alive && p.sessionId !== player.sessionId);
+    for (const c of candidates) {
+      const def = this.defOf(c);
+      const needsTarget = def.effects.some(
+        (e) => e.type === 'stealRandom' || e.type === 'stealNamed' || e.type === 'peekHand' || e.type === 'swapHand',
+      );
+      let targetSessionId: string | undefined;
+      let wantCardId: string | undefined;
+      if (needsTarget) {
+        if (others.length === 0) continue;
+        const t = others[Math.floor(this.rng() * others.length)]!;
+        targetSessionId = t.sessionId;
+        if (def.effects.some((e) => e.type === 'stealNamed')) {
+          wantCardId = t.hand.length > 0 ? t.hand[Math.floor(this.rng() * t.hand.length)]!.cardId : 'defuse';
+        }
+      }
+      const r = this.playCard(player.sessionId, { instanceId: c.iid, targetSessionId, wantCardId });
+      if (r.some((x) => x.type === 'invalid')) continue;
+      this.log(events, 'log.sleepwalk', { player: player.name, card: this.cardRef(c.cardId) });
+      events.push(...r);
+      return;
+    }
+    this.log(events, 'log.sleepwalkNothing', { player: player.name });
+  }
+
+  /** 懒懒羊：选一张梦境牌（giveTo 为空或为自己 = 留下；否则送给一名存活玩家） */
+  dreamPick(sessionId: string, input: { cardId: string; giveTo?: string }): EngineEvent[] {
+    const pending = this.pendingDream;
+    if (!pending || this.subPhase !== 'awaiting-dream') return this.invalid(sessionId, 'err.noPendingDream');
+    if (pending.sessionId !== sessionId) return this.invalid(sessionId, 'err.notYourDream');
+    if (!pending.options.includes(input.cardId)) return this.invalid(sessionId, 'err.badDreamCard');
+    const sheep = this.players.find((p) => p.sessionId === sessionId)!;
+    let receiver = sheep;
+    if (input.giveTo && input.giveTo !== sessionId) {
+      const t = this.players.find((p) => p.sessionId === input.giveTo);
+      if (!t || !t.alive) return this.invalid(sessionId, 'err.badDreamTarget');
+      receiver = t;
+    }
+    const events: EngineEvent[] = [];
+    this.pendingDream = null;
+    this.subPhase = 'awaiting-action';
+    this.ev(events, { type: 'dreamResolved' });
+    if (input.cardId === 'dream-sleepwalk') {
+      receiver.sleepwalk = true; // 梦游不进手牌：只是一个状态
+    } else {
+      receiver.hand.push({ iid: newIid(input.cardId), cardId: input.cardId });
+      this.ev(events, { type: 'hand', sessionId: receiver.sessionId });
+    }
+    if (receiver === sheep) {
+      this.log(events, 'log.dreamKeep', { player: sheep.name });
+    } else {
+      this.log(events, 'log.dreamGive', { player: sheep.name, target: receiver.name });
+      this.ev(events, {
+        type: 'private',
+        sessionId: receiver.sessionId,
+        message: { action: 'dreamGiven', fromName: sheep.name, cardId: input.cardId },
+      });
+    }
+    return events;
+  }
+
+  /** 选梦超时 / 机器人兜底：留下第一张 */
+  autoDreamPick(): EngineEvent[] {
+    const pending = this.pendingDream;
+    if (!pending) return [];
+    return this.dreamPick(pending.sessionId, { cardId: pending.options[0]! });
   }
 
   private checkWin(events: EngineEvent[]): boolean {
@@ -2014,7 +2339,12 @@ export class GameEngine {
       skill.effect.kind !== 'iceHelp' &&
       skill.effect.kind !== 'iceLychee' &&
       skill.effect.kind !== 'appleThrow' &&
-      skill.effect.kind !== 'butcherCleave'
+      skill.effect.kind !== 'butcherCleave' &&
+      skill.effect.kind !== 'driverRide' &&
+      skill.effect.kind !== 'driverLane' &&
+      skill.effect.kind !== 'juliaInvest' &&
+      skill.effect.kind !== 'juliaCashout' &&
+      skill.effect.kind !== 'sheepDream'
     ) {
       return this.invalid(sessionId, 'err.notActiveSkill');
     }
@@ -2050,6 +2380,15 @@ export class GameEngine {
       }
       if (!input.wantCardId || !this.cardMap.has(input.wantCardId)) {
         return this.invalid(sessionId, 'err.needWantCard');
+      }
+      // 懒懒羊梦乡：技能照常发动（代价与次数消耗），但偷取落空
+      if (target.asleep) {
+        player.hand = player.hand.filter((c) => !costInstances.some((x) => x.iid === c.iid));
+        this.discard.push(...costInstances);
+        st.used++;
+        this.ev(events, { type: 'hand', sessionId });
+        this.log(events, 'log.stealAsleep', { player: target.name });
+        return events;
       }
       const idx = target.hand.findIndex((c) => c.cardId === input.wantCardId);
       if (idx < 0) return this.invalid(sessionId, 'err.targetLacksCard');
@@ -2212,7 +2551,7 @@ export class GameEngine {
         return this.invalid(sessionId, 'err.alreadyAsked');
       }
       player.askedHelp.push(target.sessionId);
-      this.pendingHelp = { ownerSessionId: sessionId, helperSessionId: target.sessionId };
+      this.pendingHelp = { kind: 'help', ownerSessionId: sessionId, helperSessionId: target.sessionId };
       this.subPhase = 'awaiting-help';
       this.log(events, 'log.helpAsk', { player: player.name, target: target.name });
       this.ev(events, { type: 'private', sessionId: target.sessionId, message: { action: 'helpPrompt', fromName: player.name } });
@@ -2268,6 +2607,119 @@ export class GameEngine {
         sessionId: target.sessionId,
         message: { action: 'appleGiven', fromName: player.name, turns: 3 },
       });
+      return events;
+    }
+
+    if (skillEffect.kind === 'driverRide') {
+      // 司机小贾：上车（邀请拼车；复用秀英求助的「邀请 → 同意交一张牌 / 拒绝 / 超时」流程）
+      const cd = player.skillCooldowns[skill.id] ?? 0;
+      if (cd > 0) return this.invalid(sessionId, 'err.rideCooldown', { n: cd });
+      const target = this.players.find((p) => p.sessionId === input.targetSessionId);
+      if (!target || !target.alive || target.sessionId === sessionId) {
+        return this.invalid(sessionId, 'err.needRideTarget');
+      }
+      if (player.askedRide.includes(target.sessionId)) {
+        return this.invalid(sessionId, 'err.alreadyAskedRide');
+      }
+      if (target.freezeLayers > 0) return this.invalid(sessionId, 'err.rideFrozen');
+      if (target.hand.length === 0) return this.invalid(sessionId, 'err.rideNoCards');
+      if (target.freeRide) return this.invalid(sessionId, 'err.rideAlready');
+      player.askedRide.push(target.sessionId);
+      this.pendingHelp = { kind: 'ride', ownerSessionId: sessionId, helperSessionId: target.sessionId };
+      this.subPhase = 'awaiting-help';
+      this.log(events, 'log.rideAsk', { player: player.name, target: target.name });
+      this.ev(events, {
+        type: 'private',
+        sessionId: target.sessionId,
+        message: { action: 'helpPrompt', fromName: player.name, kind: 'ride' },
+      });
+      this.ev(events, { type: 'awaitingHelp' });
+      return events;
+    }
+
+    if (skillEffect.kind === 'driverLane') {
+      // 司机小贾：变道（选中的玩家与他当前方向上的下家交换座次；当前回合不变）
+      const cd = player.skillCooldowns[skill.id] ?? 0;
+      if (cd > 0) return this.invalid(sessionId, 'err.laneCooldown', { n: cd });
+      if (this.players.filter((p) => p.alive).length < 3) {
+        return this.invalid(sessionId, 'err.laneTooFew');
+      }
+      const target = this.players.find((p) => p.sessionId === input.targetSessionId);
+      if (!target || !target.alive) return this.invalid(sessionId, 'err.needLaneTarget');
+      const order = this.turnOrder;
+      const n = order.length;
+      const i = order.indexOf(target.sessionId);
+      let j = i;
+      for (let step = 0; step < n; step++) {
+        j = (j + this.direction + n) % n;
+        if (this.players.find((p) => p.sessionId === order[j])?.alive) break;
+      }
+      if (j === i) return this.invalid(sessionId, 'err.needLaneTarget');
+      const other = this.players.find((p) => p.sessionId === order[j])!;
+      const currentSid = this.current()?.sessionId;
+      [order[i], order[j]] = [order[j]!, order[i]!];
+      if (currentSid) this.turnIndex = order.indexOf(currentSid);
+      player.skillCooldowns[skill.id] = skillEffect.cooldownTurns;
+      this.laneSwap = { a: target.sessionId, b: other.sessionId, seq: (this.laneSwap?.seq ?? 0) + 1 };
+      this.log(events, 'log.laneChange', { player: player.name, a: target.name, b: other.name });
+      return events;
+    }
+
+    if (skillEffect.kind === 'juliaInvest') {
+      // Julia 姐：建仓——1~maxCards 张手牌进投资组合，holdTurns 个本人回合后按大盘交割
+      const cd = player.skillCooldowns[skill.id] ?? 0;
+      if (cd > 0) return this.invalid(sessionId, 'err.investCooldown', { n: cd });
+      if (player.portfolio.length > 0) return this.invalid(sessionId, 'err.investHolding');
+      const ids = input.investInstanceIds ?? [];
+      if (ids.length < 1 || ids.length > skillEffect.maxCards || new Set(ids).size !== ids.length) {
+        return this.invalid(sessionId, 'err.investCount', { n: skillEffect.maxCards });
+      }
+      const picked: CardInstance[] = [];
+      for (const id of ids) {
+        const c = player.hand.find((x) => x.iid === id);
+        if (!c) return this.invalid(sessionId, 'err.investNotInHand');
+        const kind = this.cardMap.get(c.cardId)?.kind;
+        if (kind === 'exploding' || kind === 'streaking' || kind === 'tear') {
+          return this.invalid(sessionId, 'err.investBadCard', { card: this.cardRef(c.cardId) });
+        }
+        if (player.mustPlayIid === c.iid) return this.invalid(sessionId, 'err.mustHandleDigest');
+        picked.push(c);
+      }
+      const pickedSet = new Set(ids);
+      player.hand = player.hand.filter((c) => !pickedSet.has(c.iid));
+      player.portfolio = picked;
+      player.portfolioTurns = skillEffect.holdTurns;
+      player.market = 0;
+      player.skillCooldowns[skill.id] = skillEffect.cooldownTurns;
+      this.ev(events, { type: 'hand', sessionId });
+      this.sendPortfolio(player, events);
+      this.log(events, 'log.investOpen', { player: player.name, n: picked.length, turns: skillEffect.holdTurns });
+      return events;
+    }
+
+    if (skillEffect.kind === 'juliaCashout') {
+      // Julia 姐：平仓——随机扣 1 张进弃牌堆当手续费，其余拿回
+      if (player.portfolio.length === 0) return this.invalid(sessionId, 'err.noPortfolio');
+      const [fee] = this.pickRandomFrom(player.portfolio, 1);
+      this.discard.push(fee!);
+      const back = player.portfolio.filter((c) => c.iid !== fee!.iid);
+      player.hand.push(...back);
+      this.ev(events, { type: 'hand', sessionId });
+      this.log(events, 'log.cashout', { player: player.name, n: back.length, market: player.market });
+      this.clearPortfolio(player, events);
+      return events;
+    }
+
+    if (skillEffect.kind === 'sheepDream') {
+      // 懒懒羊：数羊——照常摸牌结束回合，然后入梦（死了就不睡）
+      const cd = player.skillCooldowns[skill.id] ?? 0;
+      if (cd > 0) return this.invalid(sessionId, 'err.sheepCooldown', { n: cd });
+      if (player.mustPlayIid) return this.invalid(sessionId, 'err.mustHandleDigestFull');
+      player.skillCooldowns[skill.id] = skillEffect.cooldownTurns;
+      this.log(events, 'log.sheepSleep', { player: player.name, skill: this.skillRef(player, skill) });
+      player.asleep = true;
+      events.push(...this.drawCard(sessionId));
+      if (!player.alive) player.asleep = false;
       return events;
     }
 
@@ -2566,6 +3018,7 @@ export class GameEngine {
       player.permanentDead = true;
       player.alive = false;
       player.hand = [];
+      this.onEliminated(player, events);
       this.deathOrder.push(player.sessionId);
       this.log(events, 'log.tearDeath', { player: player.name });
       this.ev(events, { type: 'death', sessionId: player.sessionId });
@@ -2680,6 +3133,8 @@ export class GameEngine {
     this.ev(events, { type: 'hand', sessionId });
 
     const instance: CardInstance = { iid: newIid(input.cardId), cardId: input.cardId };
+    // Julia 大盘：兑换出的动作牌同样算打出一张功能牌
+    this.marketTick([instance]);
     const targetName = this.players.find((p) => p.sessionId === input.targetSessionId)?.name;
     this.log(
       events,
@@ -2879,6 +3334,8 @@ export class GameEngine {
       this.subPhase = 'awaiting-action';
       return this.invalid(sessionId, 'err.helpPartiesGone');
     }
+    if (pending.kind === 'ride') return this.resolveRide(owner, helper, input);
+
     const events: EngineEvent[] = [];
     this.pendingHelp = null;
     this.subPhase = 'awaiting-action';
@@ -2916,6 +3373,55 @@ export class GameEngine {
       type: 'private',
       sessionId: owner.sessionId,
       message: { action: 'helpResolved', accepted: true, helperName: helper.name },
+    });
+    this.chaosRipple(events);
+    return events;
+  }
+
+  /** 司机小贾：上车邀请的回应。同意 = 交一张牌当车费，下回合结束不摸牌 */
+  private resolveRide(
+    driver: EnginePlayer,
+    rider: EnginePlayer,
+    input: { accept: boolean; giveInstanceId?: string },
+  ): EngineEvent[] {
+    // 同意但没选到有效的牌：邀请保持挂起，让对方重新选（不白白作废）
+    const card = input.accept ? rider.hand.find((c) => c.iid === input.giveInstanceId) : undefined;
+    if (input.accept && !card) return this.invalid(rider.sessionId, 'err.pickCardToGive');
+
+    const events: EngineEvent[] = [];
+    this.pendingHelp = null;
+    this.subPhase = 'awaiting-action';
+    this.ev(events, { type: 'helpResolved' });
+
+    if (!card) {
+      this.log(events, 'log.rideRefused', { player: rider.name, target: driver.name });
+      this.ev(events, {
+        type: 'private',
+        sessionId: driver.sessionId,
+        message: { action: 'helpResolved', accepted: false, helperName: rider.name, kind: 'ride' },
+      });
+      return events;
+    }
+
+    rider.hand = rider.hand.filter((c) => c.iid !== card.iid);
+    driver.hand.push(card);
+    rider.freeRide = true;
+    driver.fares++;
+    const ride = this.activeSkillOf(driver, 'driver-ride');
+    if (ride?.effect.kind === 'driverRide') driver.skillCooldowns[ride.id] = ride.effect.cooldownTurns;
+    this.ev(events, { type: 'hand', sessionId: rider.sessionId });
+    this.ev(events, { type: 'hand', sessionId: driver.sessionId });
+    this.log(events, 'log.rideAccepted', { player: rider.name, target: driver.name });
+    const luck = this.characterMap.get(driver.characterId)?.skills.find((s) => s.effect.kind === 'driverLuck');
+    const per = luck?.effect.kind === 'driverLuck' ? luck.effect.faresPerLuck : 3;
+    if (driver.fares % per === 0) {
+      driver.luckCharges++;
+      this.log(events, 'log.luckGain', { player: driver.name, n: driver.luckCharges });
+    }
+    this.ev(events, {
+      type: 'private',
+      sessionId: driver.sessionId,
+      message: { action: 'helpResolved', accepted: true, helperName: rider.name, kind: 'ride' },
     });
     this.chaosRipple(events);
     return events;
@@ -3019,6 +3525,7 @@ export class GameEngine {
     p.connected = false;
     this.deck.push(...p.hand);
     p.hand = [];
+    this.onEliminated(p, events);
     this.shuffle(this.deck);
     this.deathOrder.push(sessionId);
     this.lastDeath = { sessionId, name: p.name, at: Date.now() };

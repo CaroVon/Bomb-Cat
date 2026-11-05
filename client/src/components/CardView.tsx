@@ -15,6 +15,8 @@ const KIND_FRAME: Record<string, string> = {
   defuse: 'linear-gradient(160deg,#1e2e1c,#5f8a52 45%,#1e2e1c)',
   action: 'linear-gradient(160deg,#142a46,#3f6fa8 45%,#142a46)',
   plain: 'linear-gradient(160deg,#4a3a18,#c6a14a 45%,#4a3a18)',
+  // 懒懒羊梦境牌：靛紫梦幻
+  dream: 'linear-gradient(160deg,#2a1f4a,#8f7bd6 45%,#2a1f4a)',
 };
 
 /** 香蕉覆盖期间统一边框：不按真实牌种着色，杜绝"看边框猜牌" */
@@ -80,6 +82,7 @@ function CardViewInner({
         glow && !masked ? 'is-glow' : '',
         onClick ? 'is-clickable' : '',
         masked ? 'is-masked' : '',
+        def.kind === 'dream' && !masked ? 'is-dream' : '',
       ].join(' ')}
       onClick={onClick}
       style={{

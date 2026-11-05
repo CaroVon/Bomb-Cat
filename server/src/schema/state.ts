@@ -60,6 +60,26 @@ export const PlayerState = schema(
     lockedBy: t.string().default(''),
     /** 屠夫：对各目标的剩余冷却（sessionId -> 回合） */
     butcherTargetCd: t.map('number'),
+    /** 司机小贾：车费份数 / 撞大运层数 */
+    fares: t.uint8().default(0),
+    luckCharges: t.uint8().default(0),
+    /** 乘客：下一回合结束不摸牌 */
+    freeRide: t.boolean().default(false),
+    /** 司机小贾：本回合已邀请过的玩家（客户端据此隐藏） */
+    askedRide: t.array('string'),
+    /* ---- v7：Julia 姐 / 懒懒羊 ---- */
+    /** Julia：投资组合张数（牌面隐藏，仅本人经 portfolio 私密消息得知） */
+    portfolioCount: t.uint8().default(0),
+    /** Julia：距离自动交割还剩几个本人回合（0 = 无持仓） */
+    portfolioTurns: t.uint8().default(0),
+    /** Julia：大盘（有持仓期间累计） */
+    market: t.int8().default(0),
+    /** 懒懒羊：梦乡中（偷牌落空、不能否认） */
+    asleep: t.boolean().default(false),
+    /** 梦游：下一回合开始时自动打出一张功能牌 */
+    sleepwalk: t.boolean().default(false),
+    /** 回笼觉：下一次摸牌要多摸的张数 */
+    deferredDraw: t.uint8().default(0),
   },
   'PlayerState',
 );
@@ -96,6 +116,10 @@ export const GameState = schema(
     lastPlayById: t.string().default(''),
     lastPlayCards: t.array('string'),
     lastPlayAt: t.number().default(0),
+    /** 司机小贾变道：最近一次互换座次的两人 + 序号（序号变化即播放换位动画） */
+    laneSwapA: t.string().default(''),
+    laneSwapB: t.string().default(''),
+    laneSwapSeq: t.number().default(0),
     lastPlayNoped: t.boolean().default(false),
     /** 最近一次出牌的目标（舞台"→ 谁"与目标座位脉冲） */
     lastPlayTargetId: t.string().default(''),
@@ -138,6 +162,9 @@ export const GameState = schema(
     helpPendingBy: t.string().default(''),
     /** 秀英求助中：求助者（空=无） */
     helpOwnerId: t.string().default(''),
+    /* ---- v7 ---- */
+    /** 懒懒羊醒来选梦中：选梦者（空=无） */
+    dreamBy: t.string().default(''),
   },
   'GameState',
 );

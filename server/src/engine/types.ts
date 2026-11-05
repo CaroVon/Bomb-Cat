@@ -84,6 +84,28 @@ export interface EnginePlayer {
   butcherTargetCd: Record<string, number>;
   /** 被哪位屠夫封锁（'' = 未封锁）；持续到被封锁者的下一回合结束 */
   lockedBy: string;
+  /* ---- v6：司机小贾 ---- */
+  /** 小贾累计收到的车费份数 */
+  fares: number;
+  /** 小贾「撞大运」层数（摸到爆炸牌时自动消耗 1 层放回牌堆） */
+  luckCharges: number;
+  /** 乘客：下一回合结束时不用摸牌 */
+  freeRide: boolean;
+  /** 小贾本回合已邀请过的玩家（被拒后不能重复问同一人） */
+  askedRide: string[];
+  /* ---- v7：Julia 姐 / 懒懒羊 ---- */
+  /** Julia 投资组合（不在手牌里：不会被偷/求赠/吞噬，也不能打出） */
+  portfolio: CardInstance[];
+  /** 距离自动交割还剩几个本人回合（0 = 无持仓） */
+  portfolioTurns: number;
+  /** Julia 的大盘（有持仓期间：功能/梦境牌 +1，猫牌/否认 −1） */
+  market: number;
+  /** 懒懒羊：梦乡中（别人对她的偷牌落空，她不能打否认），直到她的下一回合开始 */
+  asleep: boolean;
+  /** 梦游：下一回合开始时自动随机打出一张功能牌 */
+  sleepwalk: boolean;
+  /** 回笼觉：下一次摸牌要多摸的张数 */
+  deferredDraw: number;
 }
 
 export type SubPhase =
@@ -93,7 +115,9 @@ export type SubPhase =
   | 'awaiting-alter'
   | 'awaiting-tear'
   /** 秀英求助：等待被求助者回应（同意/拒绝/超时） */
-  | 'awaiting-help';
+  | 'awaiting-help'
+  /** 懒懒羊醒来：等待她从梦境牌里选 1 张（留下或送人） */
+  | 'awaiting-dream';
 
 export interface PendingPlay {
   playId: string;
@@ -126,10 +150,19 @@ export interface PendingAlter {
 
 /** 秀英求助挂起：等待被求助者回应 */
 export interface PendingHelp {
-  /** 秀英 */
+  /** help = 秀英求助；ride = 司机小贾邀请上车（流程相同：被邀请者同意需交一张牌） */
+  kind: 'help' | 'ride';
+  /** 秀英 / 小贾 */
   ownerSessionId: string;
   /** 被求助者 */
   helperSessionId: string;
+}
+
+/** 懒懒羊醒来挂起：等待选梦境牌 */
+export interface PendingDream {
+  sessionId: string;
+  /** 可选的梦境牌 cardId（互不相同） */
+  options: string[];
 }
 
 /** 引擎输出事件：房间层把它们翻译为 schema 更新与私密消息 */
@@ -148,6 +181,8 @@ export type EngineEvent =
   | { type: 'tearResolved' }
   | { type: 'awaitingHelp' }
   | { type: 'helpResolved' }
+  | { type: 'awaitingDream' }
+  | { type: 'dreamResolved' }
   | { type: 'death'; sessionId: string }
   | { type: 'revive'; sessionId: string }
   | { type: 'invalid'; sessionId: string; message: string; msg: LocMsg }
@@ -176,6 +211,8 @@ export interface UseSkillInput {
   costInstanceIds?: string[];
   targetSessionId?: string;
   wantCardId?: string;
+  /** Julia 建仓：要放进投资组合的手牌 */
+  investInstanceIds?: string[];
 }
 
 export interface GameEndInfo {

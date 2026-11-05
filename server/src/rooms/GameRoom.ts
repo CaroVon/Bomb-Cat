@@ -52,6 +52,8 @@ export class GameRoom extends Room<{ state: GameState }> {
   static nopeWindowMs = NOPE_WINDOW_MS;
   /** 秀英求助回应窗口毫秒（测试可覆盖） */
   static helpWindowMs = 15_000;
+  /** 懒懒羊醒来选梦窗口毫秒（测试可覆盖；超时自动留下第一张） */
+  static dreamWindowMs = 20_000;
 
   maxClients = MAX_PLAYERS;
   patchRate = 100;
@@ -62,6 +64,7 @@ export class GameRoom extends Room<{ state: GameState }> {
   private turnTimer: Delayed | null = null;
   private botTimer: Delayed | null = null;
   private helpTimer: Delayed | null = null;
+  private dreamTimer: Delayed | null = null;
   /** 机器人玩家的 sessionId 集合 */
   private botIds = new Set<string>();
   /** 机器人通过 peek 获得的牌堆顶记忆（不作弊读牌） */
@@ -199,6 +202,7 @@ export class GameRoom extends Room<{ state: GameState }> {
     this.turnTimer?.clear();
     this.botTimer?.clear();
     this.helpTimer?.clear();
+    this.dreamTimer?.clear();
     activeCodes.delete(this.state.roomCode);
   }
 
@@ -224,6 +228,12 @@ export class GameRoom extends Room<{ state: GameState }> {
       this.armHelpTimer();
       return;
     }
+    // 懒懒羊选梦：暂停回合计时（独立的选梦窗口；机器人很快自动选）
+    if (this.engine.dreamPending) {
+      this.state.turnEndsAt = 0;
+      this.armDreamTimer();
+      return;
+    }
     this.state.turnEndsAt = this.clock.currentTime + GameRoom.turnTimeoutMs;
     this.turnTimer = this.clock.setTimeout(() => {
       this.turnTimer = null;
@@ -246,6 +256,33 @@ export class GameRoom extends Room<{ state: GameState }> {
     }, GameRoom.helpWindowMs);
   }
 
+  /** 懒懒羊选梦窗口计时：真人超时自动留下第一张；机器人短延时按启发式选 */
+  private armDreamTimer(): void {
+    this.dreamTimer?.clear();
+    this.dreamTimer = null;
+    const pending = this.engine.pendingDreamInfo;
+    if (!pending) return;
+    const isBot = this.botIds.has(pending.sessionId);
+    const delay = isBot ? GameRoom.botDelayMs * (0.5 + Math.random() * 0.5) : GameRoom.dreamWindowMs;
+    this.dreamTimer = this.clock.setTimeout(() => {
+      this.dreamTimer = null;
+      const cur = this.engine.pendingDreamInfo;
+      if (!cur) return;
+      if (isBot) {
+        const d = decide(this.engine, cur.sessionId, this.botKnown);
+        if (d?.kind === 'dreamPick') {
+          this.process(this.engine.dreamPick(cur.sessionId, { cardId: d.cardId, giveTo: d.giveTo }));
+        } else {
+          this.process(this.engine.autoDreamPick());
+        }
+      } else {
+        this.process(this.engine.autoDreamPick());
+      }
+      this.sync();
+      this.armTurnTimer();
+    }, delay);
+  }
+
   /** 机器人回应求助：手牌 ≥3 张时较可能同意，交出手里价值最低的一张 */
   private scheduleBotHelpResponse(botSessionId: string): void {
     const delay = GameRoom.botDelayMs * (0.5 + Math.random() * 0.5);
@@ -260,7 +297,13 @@ export class GameRoom extends Room<{ state: GameState }> {
         return;
       }
       // 简单启发式：手里牌多就更愿意帮忙；给出价值最低的一张（普通猫优先）
-      const willing = bot.hand.length >= 3 && Math.random() < 0.7;
+      // 上车邀请：牌堆越危险越愿意付车费换一次免摸牌
+      const isRide = pending.kind === 'ride';
+      const alive = this.engine.players.filter((p) => p.alive).length;
+      const danger = (alive + 2) / Math.max(this.engine.deck.length, 1);
+      const willing = isRide
+        ? bot.hand.length >= 2 && Math.random() < Math.min(0.9, 0.25 + danger * 2)
+        : bot.hand.length >= 3 && Math.random() < 0.7;
       if (!willing) {
         this.process(this.engine.handleHelpRespond(botSessionId, { accept: false }));
       } else {
@@ -280,6 +323,13 @@ export class GameRoom extends Room<{ state: GameState }> {
     // 秀英求助：超时视为拒绝
     if (e.helpPending) {
       this.process(e.autoRefuseHelp());
+      this.sync();
+      this.armTurnTimer();
+      return;
+    }
+    // 懒懒羊选梦：超时自动留下第一张
+    if (e.dreamPending) {
+      this.process(e.autoDreamPick());
       this.sync();
       this.armTurnTimer();
       return;
@@ -383,6 +433,25 @@ export class GameRoom extends Room<{ state: GameState }> {
         skillId: helpSkillId,
         targetSessionId: decision.targetSessionId,
       });
+    } else if (decision.kind === 'driverSkill') {
+      // 司机小贾：上车 / 变道
+      this.actAs(cur.sessionId, {
+        action: 'useSkill',
+        skillId: decision.skillId,
+        targetSessionId: decision.targetSessionId,
+      });
+    } else if (decision.kind === 'juliaSkill') {
+      // Julia 姐：建仓 / 平仓
+      this.actAs(cur.sessionId, {
+        action: 'useSkill',
+        skillId: decision.skillId,
+        investInstanceIds: decision.investInstanceIds,
+      });
+    } else if (decision.kind === 'sheepDream') {
+      // 懒懒羊：数羊
+      this.actAs(cur.sessionId, { action: 'useSkill', skillId: decision.skillId });
+    } else if (decision.kind === 'dreamPick') {
+      this.actAs(cur.sessionId, { action: 'dreamPick', cardId: decision.cardId, giveTo: decision.giveTo });
     } else if (decision.kind === 'butcherCleave') {
       // 屠夫：剔骨封锁
       this.actAs(cur.sessionId, {
@@ -517,8 +586,13 @@ export class GameRoom extends Room<{ state: GameState }> {
             costInstanceIds: message.costInstanceIds,
             targetSessionId: message.targetSessionId,
             wantCardId: message.wantCardId,
+            investInstanceIds: message.investInstanceIds,
           }),
         );
+        break;
+      }
+      case 'dreamPick': {
+        this.process(this.engine.dreamPick(sid, { cardId: message.cardId, giveTo: message.giveTo }));
         break;
       }
       case 'tearChoice': {
@@ -617,6 +691,11 @@ export class GameRoom extends Room<{ state: GameState }> {
         case 'helpResolved': {
           this.helpTimer?.clear();
           this.helpTimer = null;
+          break;
+        }
+        case 'dreamResolved': {
+          this.dreamTimer?.clear();
+          this.dreamTimer = null;
           break;
         }
         case 'gameEnd': {
@@ -724,6 +803,7 @@ export class GameRoom extends Room<{ state: GameState }> {
     s.tearPendingBy = e.pendingTear?.sessionId ?? '';
     s.helpPendingBy = e.pendingHelpInfo?.helperSessionId ?? '';
     s.helpOwnerId = e.pendingHelpInfo?.ownerSessionId ?? '';
+    s.dreamBy = e.pendingDreamInfo?.sessionId ?? '';
     s.turnIndex = e.turnIndex;
     s.direction = e.direction;
     s.deckCount = e.deck.length;
@@ -739,6 +819,9 @@ export class GameRoom extends Room<{ state: GameState }> {
     s.lastPlayById = lp?.bySessionId ?? '';
     GameRoom.syncArray(s.lastPlayCards, lp?.cardIds ?? []);
     s.lastPlayAt = lp?.at ?? 0;
+    s.laneSwapA = e.laneSwap?.a ?? '';
+    s.laneSwapB = e.laneSwap?.b ?? '';
+    s.laneSwapSeq = e.laneSwap?.seq ?? 0;
     s.lastPlayNoped = lp?.noped ?? false;
     s.lastPlayTargetId = lp?.targetSessionId ?? '';
     s.lastPlayTargetName =
@@ -805,11 +888,21 @@ export class GameRoom extends Room<{ state: GameState }> {
         ps.lycheeGiven = ep.lycheeGivenThisTurn;
         ps.appleTurns = ep.appleTurns;
         ps.boneStacks = ep.boneStacks;
+        ps.fares = ep.fares;
+        ps.luckCharges = ep.luckCharges;
+        ps.freeRide = ep.freeRide;
         ps.lockedBy = ep.lockedBy;
+        ps.portfolioCount = ep.portfolio.length;
+        ps.portfolioTurns = ep.portfolioTurns;
+        ps.market = ep.market;
+        ps.asleep = ep.asleep;
+        ps.sleepwalk = ep.sleepwalk;
+        ps.deferredDraw = ep.deferredDraw;
         for (const [sid, cd] of Object.entries(ep.butcherTargetCd)) {
           if (ps.butcherTargetCd.get(sid) !== cd) ps.butcherTargetCd.set(sid, cd);
         }
         GameRoom.syncArray(ps.askedHelp, ep.askedHelp);
+        GameRoom.syncArray(ps.askedRide, ep.askedRide);
 
         // 技能冷却同步
         for (const [skillId, cd] of Object.entries(ep.skillCooldowns)) {

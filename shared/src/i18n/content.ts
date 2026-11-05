@@ -23,6 +23,30 @@ const PLAIN_CAT_DESC =
   'Plain cat. Play 2 of a kind to steal a random card; 3 of a kind to name the card you steal.';
 
 export const CARD_EN: Record<string, CardTextEn> = {
+  'dream-snooze': {
+    name: 'Snooze',
+    description: "Play: end your turn immediately without drawing — but your next draw takes 1 extra card (the draw is postponed, not skipped).",
+  },
+  'dream-fleece': {
+    name: 'Fleece Blanket',
+    description: "Just keep it in hand; it can't be played. When you're attacked it wraps you up automatically: take 1 fewer turn in a row (minimum 1), then it's discarded.",
+  },
+  'dream-sense': {
+    name: 'Prophetic Dream',
+    description: 'Play: secretly learn which of the top 5 cards of the deck are exploding cards (you don\'t see what the other cards are).',
+  },
+  'dream-weave': {
+    name: 'Dream Weave',
+    description: 'Play: move every exploding card among the top 3 cards of the deck to the bottom.',
+  },
+  'dream-nightmare': {
+    name: 'Nightmare',
+    description: 'While you hold it, every draw takes 1 extra card. You may spend a play to throw it away (no other effect).',
+  },
+  'dream-sleepwalk': {
+    name: 'Sleepwalk',
+    description: "Doesn't go into your hand: the receiver sleepwalks at the start of their next turn, automatically playing a random action card from their hand (Nope, Defuse, dream cards and cat cards excluded) with its normal effect.",
+  },
   exploding: {
     name: 'Exploding Kitten',
     description: "Draw it and you explode! No Defuse means you're out.",
@@ -368,6 +392,63 @@ export const CHAR_EN: Record<string, CharTextEn> = {
         name: 'Bone Carve',
         description:
           "Passive: whenever any player's cards are taken by someone else (playing or handing over your own cards doesn't count), gain +1 Carve stack per card (max 5). Active: spend 3 stacks and pick a player — take 1 random card from them (earns no stacks) and Lock their active skills and action cards (Defuse excepted) until the end of their next turn. While they're Locked, your Favor / pair / triple steals take 2 cards from them, and if they're next in turn order, your Attack makes them take 4 turns in a row (doesn't stack with Multiply). 5-turn cooldown per target player; no cooldown otherwise.",
+      },
+    },
+  },
+  driver: {
+    name: 'Driver Jia',
+    title: 'Jackpot Ride',
+    description:
+      'Active "Hop In": invite a player to carpool — if they accept, they hand you a card as the fare and skip drawing at the end of their next turn. Active "Lane Change": swap the seats of two adjacent players, changing who is next to whom. Passive "Old Hand": every 3 fares earns 1 Jackpot stack; when you draw an exploding card it is automatically put back into the deck.',
+    lore: "Where to, boss? Once you're in the car, it's fate.",
+    skills: {
+      'driver-ride': {
+        name: 'Hop In',
+        description:
+          "Active (3-turn cooldown, starting only once someone accepts): invite another player to carpool; they may refuse. Accept: they hand you a card of their choice as the fare, and they don't draw at the end of their next turn (covers one turn only). Refuse: you may ask someone else this turn, but not the same player twice.",
+      },
+      'driver-lane': {
+        name: 'Lane Change',
+        description:
+          'Active (4-turn cooldown): pick a player and swap seats between them and the player after them (you may include yourself). Turn order, where Attacks land, and who counts as "next" all change from then on.',
+      },
+      'driver-luck': {
+        name: 'Old Hand',
+        description:
+          'Passive: every 3 fares collected grants 1 Jackpot stack (stackable). When you draw an Exploding Kitten or Exploding Apple, 1 stack is spent automatically to put it back at a random spot in the deck — no explosion, no Defuse used.',
+      },
+    },
+  },
+  julia: {
+    name: 'Julia',
+    title: 'The Executive',
+    description:
+      'Active "Open Position": put 1–3 cards from your hand into a portfolio (face down, safe from steals, unplayable); it settles after 2 turns by the Market — every action card anyone plays is +1, every cat card or Nope is −1. Market ≥ +2 doubles your stake, ≤ −2 loses half, anything else returns it as is. Active "Cash Out": exit early at any time for a 1-card fee.',
+    lore: 'Risk and reward always scale together. In today\'s meeting, I only want the conclusion.',
+    skills: {
+      'julia-invest': {
+        name: 'Open Position',
+        description:
+          'Active (3-turn cooldown): put 1–3 cards from your hand into your portfolio (no Exploding Kittens, Streaking Kittens or Tears); only one position at a time. While held, those cards can\'t be stolen, begged for or devoured, and can\'t be played. It settles automatically at the start of your 2nd turn: Market ≥ +2 is a bull run — get your whole stake back plus the same number of random non-exploding cards from the discard pile; −1 to +1 is flat — get it back as is; ≤ −2 is a crash — lose a random half (rounded up).',
+      },
+      'julia-cashout': {
+        name: 'Cash Out',
+        description:
+          'Active (no cooldown, needs an open position): exit early — 1 random card goes to the discard pile as the fee and the rest return to your hand.',
+      },
+    },
+  },
+  lazy_sheep: {
+    name: 'Lazy Sheep',
+    title: 'Dream Weaver',
+    description:
+      'Active "Count Sheep": end your turn right away (drawing as usual) and fall asleep — while asleep nobody can steal from you, but you can\'t play Nope. When you wake at your next turn, pick 1 of 2 random dream cards: keep it, or give it to any player. Dream cards are brand-new action cards — keep the sweet dreams, slip the nightmares to rivals.',
+    lore: 'One sheep, two sheep… zzz… anything is possible in a dream.',
+    skills: {
+      'sheep-dream': {
+        name: 'Count Sheep',
+        description:
+          'Active (3-turn cooldown): hypnotize yourself — end your turn right away (drawing as usual) and sleep until your next turn starts. While asleep, steals against you (Favor, pairs, triples, Phantom Thief) fizzle, but you can\'t play Nope. On waking, reveal 2 random dream cards and pick 1 to keep or give to a living player; the other is discarded.',
       },
     },
   },

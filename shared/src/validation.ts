@@ -47,9 +47,10 @@ export function validateCustomCard(card: CardDef, errors: string[]): boolean {
     card.kind === 'exploding' ||
     card.kind === 'defuse' ||
     card.kind === 'streaking' ||
-    card.kind === 'tear'
+    card.kind === 'tear' ||
+    card.kind === 'dream'
   ) {
-    err(`${card.id}: 自定义卡不能是爆炸猫、拆解、果奔猫或眼泪`);
+    err(`${card.id}: 自定义卡不能是爆炸猫、拆解、果奔猫、眼泪或梦境牌`);
   } else if (card.kind !== 'action' && card.kind !== 'plain') {
     err(`${card.id}: 卡牌类型必须是 action 或 plain`);
   }
@@ -138,6 +139,11 @@ export function validateDeck(deck: DeckDef, playerCount: number): ValidationResu
     }
     if (!BUILTIN_CARD_MAP.has(cardId) && !ids.has(cardId)) {
       err(`${cardId}: 既不是内置卡也不在 customCards 中`);
+      continue;
+    }
+    const builtinKind = BUILTIN_CARD_MAP.get(cardId)?.kind;
+    if (builtinKind === 'dream' || builtinKind === 'tear') {
+      err(`${cardId}: 梦境牌 / 眼泪是角色专属牌，不能放进卡组`);
       continue;
     }
     if (count > MAX_CARD_COPIES) err(`${cardId}: 单卡数量不能超过 ${MAX_CARD_COPIES}`);
@@ -242,6 +248,38 @@ export function validateSkill(skill: SkillDef, errors: string[]): boolean {
       }
       break;
     case 'appleThrow':
+      if ((effect.cooldownTurns ?? 0) < 0 || (effect.cooldownTurns ?? 0) > 10) {
+        return fail(errors, `${skill.id}: cooldownTurns 必须在 0-10`);
+      }
+      break;
+    case 'driverRide':
+    case 'driverLane':
+      if ((effect.cooldownTurns ?? 0) < 0 || (effect.cooldownTurns ?? 0) > 10) {
+        return fail(errors, `${skill.id}: cooldownTurns 必须在 0-10`);
+      }
+      break;
+    case 'driverLuck':
+      if ((effect.faresPerLuck ?? 0) < 1 || (effect.faresPerLuck ?? 0) > 6) {
+        return fail(errors, `${skill.id}: faresPerLuck 必须在 1-6`);
+      }
+      break;
+    case 'juliaInvest':
+      if ((effect.maxCards ?? 0) < 1 || (effect.maxCards ?? 0) > 5) {
+        return fail(errors, `${skill.id}: maxCards 必须在 1-5`);
+      }
+      if ((effect.holdTurns ?? 0) < 1 || (effect.holdTurns ?? 0) > 5) {
+        return fail(errors, `${skill.id}: holdTurns 必须在 1-5`);
+      }
+      if ((effect.cooldownTurns ?? 0) < 0 || (effect.cooldownTurns ?? 0) > 10) {
+        return fail(errors, `${skill.id}: cooldownTurns 必须在 0-10`);
+      }
+      break;
+    case 'juliaCashout':
+      break;
+    case 'sheepDream':
+      if ((effect.options ?? 0) < 1 || (effect.options ?? 0) > 4) {
+        return fail(errors, `${skill.id}: options 必须在 1-4`);
+      }
       if ((effect.cooldownTurns ?? 0) < 0 || (effect.cooldownTurns ?? 0) > 10) {
         return fail(errors, `${skill.id}: cooldownTurns 必须在 0-10`);
       }

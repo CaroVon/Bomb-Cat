@@ -182,6 +182,65 @@ export const BUILTIN_CARDS: CardDef[] = [
     description: 'Nana 的眼泪。摸到时选择：弃 1 张手牌喂给 Nana 让她复活（眼泪传递给下一位），或拒绝并多摸 2 张（眼泪放回牌堆顶）。',
     effects: [],
   },
+  /* ============ 懒懒羊专属：梦境牌（不进普通牌堆，只能从梦里获得） ============ */
+  {
+    id: 'dream-snooze',
+    name: '回笼觉',
+    kind: 'dream',
+    emoji: '🛌',
+    description: '打出：立即结束回合且不摸牌；但你下一次摸牌时要多摸 1 张（摸牌延期，不是免除）。',
+    effects: [{ type: 'snooze' }],
+  },
+  {
+    id: 'dream-fleece',
+    name: '羊毛毯',
+    kind: 'dream',
+    emoji: '🧶',
+    description: '放在手里即可，不能主动打出：你被攻击时自动盖上，少连续行动 1 回合（最少 1 回合），用完弃掉。',
+    effects: [],
+  },
+  {
+    id: 'dream-sense',
+    name: '预知梦',
+    kind: 'dream',
+    emoji: '🔮',
+    description: '打出：私密得知牌堆顶 5 张里哪几个位置是爆炸牌（看不到其他牌是什么）。',
+    effects: [{ type: 'bombSense', count: 5 }],
+  },
+  {
+    id: 'dream-weave',
+    name: '造梦',
+    kind: 'dream',
+    emoji: '🌙',
+    description: '打出：把牌堆顶 3 张里的爆炸牌全部移到牌堆底。',
+    effects: [{ type: 'buryBombs', count: 3 }],
+  },
+  {
+    id: 'dream-nightmare',
+    name: '噩梦',
+    kind: 'dream',
+    emoji: '😱',
+    description: '拿在手里时，每次摸牌都要多摸 1 张。可以花一次出牌把它打出扔掉（没有其他效果）。',
+    effects: [],
+  },
+  {
+    id: 'dream-sleepwalk',
+    name: '梦游',
+    kind: 'dream',
+    emoji: '🚶',
+    description: '不进手牌：收到的人下一回合开始时会梦游，自动随机打出一张手里的功能牌（否认、拆解、梦境牌和猫牌除外），效果照常生效。',
+    effects: [],
+  },
+];
+
+/** 梦境牌 id（懒懒羊「数羊」醒来时从中随机抽取） */
+export const DREAM_CARD_IDS: readonly string[] = [
+  'dream-snooze',
+  'dream-fleece',
+  'dream-sense',
+  'dream-weave',
+  'dream-nightmare',
+  'dream-sleepwalk',
 ];
 
 export const BUILTIN_CARD_MAP: ReadonlyMap<string, CardDef> = new Map(

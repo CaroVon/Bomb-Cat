@@ -14,7 +14,14 @@ export type BotDecision =
   | { kind: 'bananaAction'; cardId: string; costInstanceIds: string[] }
   | { kind: 'iceHelp'; targetSessionId: string }
   | { kind: 'appleEat'; giveInstanceId: string }
-  | { kind: 'butcherCleave'; skillId: string; targetSessionId: string };
+  | { kind: 'butcherCleave'; skillId: string; targetSessionId: string }
+  | { kind: 'driverSkill'; skillId: string; targetSessionId: string }
+  | { kind: 'juliaSkill'; skillId: string; investInstanceIds?: string[] }
+  | { kind: 'sheepDream'; skillId: string }
+  | { kind: 'dreamPick'; cardId: string; giveTo?: string };
+
+/** 懒懒羊选梦：好梦留给自己，噩梦/梦游塞给手牌最多的对手 */
+const GOOD_DREAMS = ['dream-snooze', 'dream-fleece', 'dream-sense', 'dream-weave'];
 
 const rand = () => Math.random();
 
@@ -45,6 +52,16 @@ export function decide(
     const booms: number[] = [];
     cards.forEach((c, i) => (isBoom(c.cardId) ? booms : normal).push(i));
     return { kind: 'alter', order: [...normal, ...booms] };
+  }
+
+  if (e.subPhase === 'awaiting-dream') {
+    const pd = e.pendingDreamInfo;
+    if (!pd || pd.sessionId !== sid) return null;
+    const good = pd.options.find((id) => GOOD_DREAMS.includes(id));
+    if (good) return { kind: 'dreamPick', cardId: good };
+    const bad = pd.options[0]!;
+    const rival = strongest(e.players.filter((p) => p.alive && p.sessionId !== sid));
+    return rival ? { kind: 'dreamPick', cardId: bad, giveTo: rival } : { kind: 'dreamPick', cardId: bad };
   }
 
   if (e.subPhase !== 'awaiting-action') return null;
@@ -122,6 +139,58 @@ export function decide(
     const t = strongest(targets);
     if (t && rand() < 0.8) return { kind: 'butcherCleave', skillId: cleave.id, targetSessionId: t };
   }
+  // 司机小贾：上车——邀请手牌最多、本回合没问过、没冰冻、不在车上的人
+  if (me.characterId === 'driver') {
+    const ride = e.characterMap.get('driver')?.skills.find((s) => s.effect.kind === 'driverRide');
+    if (ride && (me.skillCooldowns[ride.id] ?? 0) <= 0) {
+      const riders = aliveOthers.filter(
+        (p) => !me.askedRide.includes(p.sessionId) && p.freezeLayers <= 0 && !p.freeRide && p.hand.length > 0,
+      );
+      const t = strongest(riders);
+      if (t && rand() < 0.75) return { kind: 'driverSkill', skillId: ride.id, targetSessionId: t };
+    }
+    // 变道：偶尔把自己和下家对调（避开下一轮的攻击落点）
+    const lane = e.characterMap.get('driver')?.skills.find((s) => s.effect.kind === 'driverLane');
+    if (lane && (me.skillCooldowns[lane.id] ?? 0) <= 0 && aliveOthers.length >= 2 && rand() < 0.2) {
+      return { kind: 'driverSkill', skillId: lane.id, targetSessionId: sid };
+    }
+  }
+
+  const aliveCount0 = e.players.filter((p) => p.alive).length;
+  const danger0 = (aliveCount0 + 2) / Math.max(e.deck.length, 1);
+
+  // Julia 姐：没持仓且冷却好、手里 ≥2 张普通猫 → 35% 拿 1~2 张猫建仓；持仓且大盘 ≤ −2 → 平仓止损
+  if (me.characterId === 'julia') {
+    const skills = e.characterMap.get('julia')?.skills ?? [];
+    const invest = skills.find((s) => s.effect.kind === 'juliaInvest');
+    const cashout = skills.find((s) => s.effect.kind === 'juliaCashout');
+    if (me.portfolio.length > 0) {
+      if (cashout && me.market <= -2) return { kind: 'juliaSkill', skillId: cashout.id };
+    } else if (invest && (me.skillCooldowns[invest.id] ?? 0) <= 0) {
+      const cats = hand.filter((c) => e.cardMap.get(c.cardId)?.kind === 'plain');
+      if (cats.length >= 2 && rand() < 0.35) {
+        const n = rand() < 0.5 ? 1 : 2;
+        return { kind: 'juliaSkill', skillId: invest.id, investInstanceIds: cats.slice(0, n).map((c) => c.iid) };
+      }
+    }
+  }
+
+  // 懒懒羊：危险度高时 60% 数羊入梦
+  if (me.characterId === 'lazy_sheep') {
+    const dream = e.characterMap.get('lazy_sheep')?.skills.find((s) => s.effect.kind === 'sheepDream');
+    if (dream && (me.skillCooldowns[dream.id] ?? 0) <= 0 && !me.mustPlayIid && danger0 > 0.3 && rand() < 0.6) {
+      return { kind: 'sheepDream', skillId: dream.id };
+    }
+  }
+
+  // 梦境牌：噩梦尽快扔掉；危险时回笼觉 / 造梦；偶尔预知梦（羊毛毯是被动，绝不主动打）
+  if (has('dream-nightmare') && rand() < 0.8) return { kind: 'play', instanceId: pick('dream-nightmare') };
+  if (danger0 > 0.3) {
+    if (has('dream-weave') && rand() < 0.6) return { kind: 'play', instanceId: pick('dream-weave') };
+    if (has('dream-snooze') && rand() < 0.6) return { kind: 'play', instanceId: pick('dream-snooze') };
+  }
+  if (danger0 > 0.2 && has('dream-sense') && rand() < 0.3) return { kind: 'play', instanceId: pick('dream-sense') };
+
   // 屠夫压制：对被自己封锁的玩家，偷牌/攻击翻倍
   const suppressed = aliveOthers.find((p) => p.lockedBy === sid && p.hand.length > 0);
   const nextId = e.nextAliveSessionId();

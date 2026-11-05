@@ -41,7 +41,13 @@ export interface GameSnapshot {
     mode: 'view' | 'discard' | 'steal';
   } | null;
   /** 秀英求助：收到求助请求（我是被求助者，需回应） */
-  helpPrompt: { id: number; fromName: string } | null;
+  helpPrompt: { id: number; fromName: string; kind: 'help' | 'ride' } | null;
+  /** Julia：我的投资组合（仅本人可见；空数组 = 无持仓） */
+  portfolio: CardDef[];
+  /** 懒懒羊醒来：待挑选的梦境牌 */
+  dreamPrompt: { id: number; options: CardDef[] } | null;
+  /** 预知梦：牌堆顶 checked 张里爆炸牌的位置（1 = 顶） */
+  bombSense: { id: number; positions: number[]; checked: number } | null;
 }
 
 let snap: GameSnapshot = {
@@ -66,6 +72,9 @@ let snap: GameSnapshot = {
   defuseBanana: false,
   exposePrompt: null,
   helpPrompt: null,
+  portfolio: [],
+  dreamPrompt: null,
+  bombSense: null,
 };
 
 const listeners = new Set<() => void>();
@@ -131,6 +140,9 @@ function attach(room: Room<any>): void {
   snap.status = 'in-room';
   snap.error = null;
   snap.gameEnd = null;
+  snap.portfolio = [];
+  snap.dreamPrompt = null;
+  snap.bombSense = null;
   if (room.roomId && room.reconnectionToken) {
     saveReconnectHint(room.roomId, room.reconnectionToken);
   }
@@ -229,22 +241,39 @@ function attach(room: Room<any>): void {
     },
   );
   /* ---- v3：数学老师 / 秀英 ---- */
-  room.onMessage('helpPrompt', (msg: { fromName: string }) => {
-    snap.helpPrompt = { id: ++modalSeq, fromName: msg.fromName };
+  room.onMessage('helpPrompt', (msg: { fromName: string; kind?: 'help' | 'ride' }) => {
+    snap.helpPrompt = { id: ++modalSeq, fromName: msg.fromName, kind: msg.kind ?? 'help' };
     emit();
   });
-  room.onMessage('helpResolved', (msg: { accepted: boolean; helperName?: string }) => {
+  room.onMessage('helpResolved', (msg: { accepted: boolean; helperName?: string; kind?: 'help' | 'ride' }) => {
     snap.helpPrompt = null;
+    const name = msg.helperName ?? tr('toast.someone');
     showToast(
-      msg.accepted
-        ? tr('toast.helpAccepted', { name: msg.helperName ?? tr('toast.someone') })
-        : tr('toast.helpRejected', { name: msg.helperName ?? tr('toast.someone') }),
+      msg.kind === 'ride'
+        ? tr(msg.accepted ? 'toast.rideAccepted' : 'toast.rideRejected', { name })
+        : tr(msg.accepted ? 'toast.helpAccepted' : 'toast.helpRejected', { name }),
     );
     emit();
   });
   /* ---- v4：邪恶苹果头 ---- */
   room.onMessage('appleGiven', (msg: { fromName: string; turns: number }) => {
     showToast(tr('toast.apple', { name: msg.fromName, turns: msg.turns }));
+  });
+  /* ---- v7：Julia 姐 / 懒懒羊 ---- */
+  room.onMessage('portfolio', (msg: { cards: CardDef[] }) => {
+    snap.portfolio = msg.cards ?? [];
+    emit();
+  });
+  room.onMessage('dreamPrompt', (msg: { options: CardDef[] }) => {
+    snap.dreamPrompt = { id: ++modalSeq, options: msg.options ?? [] };
+    emit();
+  });
+  room.onMessage('bombSense', (msg: { positions: number[]; checked: number }) => {
+    snap.bombSense = { id: ++modalSeq, positions: msg.positions ?? [], checked: msg.checked ?? 5 };
+    emit();
+  });
+  room.onMessage('dreamGiven', (msg: { fromName: string; cardId: string }) => {
+    showToast(tr('toast.dreamGiven', { name: msg.fromName, card: cardName(msg.cardId, getLang()) }));
   });
 
   room.onLeave((code) => {
@@ -259,6 +288,9 @@ function attach(room: Room<any>): void {
     snap.defusePrompt = null;
     snap.futureRewritePrompt = null;
     snap.defuseBanana = false;
+    snap.portfolio = [];
+    snap.dreamPrompt = null;
+    snap.bombSense = null;
     emit();
   });
   room.onError?.((code: number, message?: string) => {
@@ -451,6 +483,27 @@ export function sendHelpRespond(accept: boolean, giveInstanceId?: string): void 
 /** 邪恶苹果头：吃掉身上的邪恶苹果（交出一张手牌给投掷者） */
 export function sendAppleEat(giveInstanceId: string): void {
   snap.room?.send('act', { action: 'appleEat', giveInstanceId });
+}
+
+/** 懒懒羊：选定梦境牌（giveTo 为空 = 自己收下） */
+export function sendDreamPick(cardId: string, giveTo?: string): void {
+  snap.dreamPrompt = null;
+  emit();
+  snap.room?.send('act', { action: 'dreamPick', cardId, giveTo });
+}
+
+export function clearDreamPrompt(): void {
+  if (snap.dreamPrompt !== null) {
+    snap.dreamPrompt = null;
+    emit();
+  }
+}
+
+export function clearBombSense(id: number): void {
+  if (snap.bombSense?.id === id) {
+    snap.bombSense = null;
+    emit();
+  }
 }
 
 export function clearPeek(id: number): void {

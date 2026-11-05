@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <b>Online multiplayer · 18 characters · world rules · custom decks — a web-based Exploding Kittens-style game, fully original</b>
+  <b>Online multiplayer · 21 characters · world rules · custom decks — a web-based Exploding Kittens-style game, fully original</b>
 </p>
 
 A web-based Exploding Kittens–style party game with online multiplayer, deep customization, and an optional user system — fully original implementation.
@@ -23,7 +23,7 @@ A web-based Exploding Kittens–style party game with online multiplayer, deep c
 - **Full rules + two expansions**: Attack / Skip / Favor / Shuffle / See the Future / Nope (8s window, counter-Nope) / Defuse with chosen insert position / streak stacking
   - **Imploding expansion**: Reverse ↩️ / Alter the Future 🔭 / Draw from the Bottom 🕳️ / Feral cat (wildcard combos) 🐈‍⬛
   - **Streaking expansion**: Streaking Cat 🐱‍💨 — secretly keep an exploding card in hand (cannot win while holding it; drawing a second one detonates)
-- **18 characters**: 7 classics + 11 deeply custom ones, each with unique mechanics (see the in-game codex or [docs/CUSTOM_CHARACTERS.md](docs/CUSTOM_CHARACTERS.md))
+- **21 characters**: 7 classics + 14 deeply custom ones, each with unique mechanics (see the in-game codex or [docs/CUSTOM_CHARACTERS.md](docs/CUSTOM_CHARACTERS.md))
   - **Classics**: Echo Mage, Oracle, Iron Knight, Phantom Thief, Alchemist, Lucky Cat
   - **Voyage**: swap 3 cards with a chosen player — your 3 are hand-picked, theirs are random
   - **Nana**: starts without a Defuse; on death becomes a Tear card; 3 Tears = permanent death
@@ -36,6 +36,9 @@ A web-based Exploding Kittens–style party game with online multiplayer, deep c
   - **Xiuying**: starts Frozen (10 stacks, immune to skills); thaw via help / being hit by skills & cards; feed lychees — 2 lychees grant a random cat
   - **Evil Apple Head**: hides an "Exploding Apple" in the deck (a bomb for others; she puts it back and draws); throws apples — targets may eat one (give a card) or it becomes another Exploding Apple after 3 turns
   - **Butcher**: gains "Bone" stacks whenever someone's cards are taken by another player; spends 3 to lock a player (no skills or action cards until the end of their next turn) and steal a card — steals and attacks against the locked player are doubled
+  - **Driver Jia (Jackpot Ride)**: offers rides — a passenger pays a card as the fare and skips their next draw; "Lane Change" swaps two adjacent seats; every 3 fares earns a Jackpot stack that auto-returns an exploding card he draws
+  - **Julia**: invests cards into a portfolio that settles after 2 turns by a public Market — lots of action cards played means a bull run (stake doubled), lots of cat cards a crash (half lost); rivals can tank it on purpose
+  - **Lazy Sheep**: "Count Sheep" to fall asleep (can't be stolen from), then wake up to pick 1 of 2 brand-new dream cards — keep the sweet dreams, gift the nightmares
 - **6 world rules**: drawn each game, never twice in a row — Mad Draw 🌀 / Double Down 🎰 / Pass the Joy 🎁 / Defuse Galore 🔧 / Overdrive ⚡ / All-Seeing Eye 👁️
 - **AI bots**: heuristic scoring AI (probabilistic beliefs, no cheating), aware of special mechanics (banana exchange, eating apples, help-thaw); practice mode with one click; quick match fills bots after 15s
 - **Deck share codes**: export custom decks as `BM1.xxxx` short codes
@@ -84,7 +87,7 @@ Open http://localhost:5173 — enter a nickname → create a room → share the 
 More commands:
 
 ```bash
-npm test           # all tests (shared validation + engine/characters + room integration — 110 tests)
+npm test           # all tests (shared validation + engine/characters + room integration — 157 tests)
 npm run typecheck  # typecheck across the three packages
 npm run build      # production build
 ```
@@ -140,7 +143,7 @@ Other setups:
 ## Tests
 
 ```bash
-npm test           # 110 tests (shared 8 + server 102)
+npm test           # 157 tests (shared 12 + server 145)
 npm run e2e        # Playwright end-to-end suites
 ```
 

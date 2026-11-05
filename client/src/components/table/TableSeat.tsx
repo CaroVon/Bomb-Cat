@@ -30,6 +30,16 @@ export interface TableSeatData {
   /** 屠夫：剔骨层数 / 被哪位屠夫封锁 */
   boneStacks?: number;
   lockedBy?: string;
+  /** 司机小贾：撞大运层数 / 乘客标记 */
+  luckCharges?: number;
+  freeRide?: boolean;
+  /** Julia：持仓张数 / 大盘 */
+  portfolioCount?: number;
+  market?: number;
+  /** 懒懒羊：梦乡 / 梦游 / 回笼觉延期摸牌 */
+  asleep?: boolean;
+  sleepwalk?: boolean;
+  deferredDraw?: number;
 }
 
 interface Props {
@@ -62,6 +72,27 @@ interface Props {
   appleTurns?: number;
   boneStacks?: number;
   locked?: boolean;
+  luckCharges?: number;
+  freeRide?: boolean;
+  portfolioCount?: number;
+  market?: number;
+  asleep?: boolean;
+  sleepwalk?: boolean;
+  deferredDraw?: number;
+  /** 出牌顺位（1 = 本机玩家的下家） */
+  orderNo?: number;
+  /** 刚被变道换过位置：高亮一下 */
+  swapped?: boolean;
+}
+
+/** 带符号的整数（+2 / 0 / −1） */
+export function fmtSigned(n: number): string {
+  return n > 0 ? `+${n}` : n < 0 ? `−${Math.abs(n)}` : '0';
+}
+
+/** 大盘涨跌色：≥ +2 牛（绿）/ ≤ −2 熊（红）/ 其余中性 */
+export function marketTone(n: number): string {
+  return n >= 2 ? 'is-bull' : n <= -2 ? 'is-bear' : 'is-flat';
 }
 
 /** 自计时倒计时角标（只在挂载期间 tick） */
@@ -103,6 +134,15 @@ function TableSeatInner({
   appleTurns,
   boneStacks,
   locked,
+  luckCharges,
+  freeRide,
+  portfolioCount,
+  market,
+  asleep,
+  sleepwalk,
+  deferredDraw,
+  orderNo,
+  swapped,
 }: Props) {
   const { t, lang } = useI18n();
   const char = BUILTIN_CHARACTER_MAP.get(seat.characterId);
@@ -124,10 +164,17 @@ function TableSeatInner({
   const _apple = appleTurns ?? seat.appleTurns ?? 0;
   const _bones = boneStacks ?? seat.boneStacks ?? 0;
   const _locked = locked ?? !!seat.lockedBy;
+  const _luck = luckCharges ?? seat.luckCharges ?? 0;
+  const _ride = freeRide ?? !!seat.freeRide;
+  const _pf = portfolioCount ?? seat.portfolioCount ?? 0;
+  const _market = market ?? seat.market ?? 0;
+  const _asleep = asleep ?? !!seat.asleep;
+  const _sleepwalk = sleepwalk ?? !!seat.sleepwalk;
+  const _deferred = deferredDraw ?? seat.deferredDraw ?? 0;
 
   return (
     <div
-      className={`table-seat ${isCurrent ? 'is-current' : ''} ${!_alive ? 'is-dead' : ''} ${bounced ? 'is-bounced' : ''} ${targeted ? 'is-targeted' : ''}`}
+      className={`table-seat ${isCurrent ? 'is-current' : ''} ${!_alive ? 'is-dead' : ''} ${bounced ? 'is-bounced' : ''} ${targeted ? 'is-targeted' : ''} ${swapped ? 'is-swapped' : ''}`}
       style={{ ...position, ['--theme' as string]: themeColor }}
     >
       {/* 角色立绘框 */}
@@ -142,6 +189,11 @@ function TableSeatInner({
           </div>
         )}
         {isCurrent && _alive && <div className="table-seat-turn-glow" />}
+        {!!orderNo && _alive && (
+          <span className="table-seat-order" title={t('game.seatOrderT')}>
+            {orderNo}
+          </span>
+        )}
         {!!timerEndsAt && timerEndsAt > 0 && _alive && <SeatTimer endsAt={timerEndsAt} />}
       </div>
 
@@ -211,6 +263,41 @@ function TableSeatInner({
               {_locked && (
                 <span className="seat-status-badge is-locked" title={t('table.st.locked')}>
                   🔒
+                </span>
+              )}
+              {_luck > 0 && (
+                <span className="seat-status-badge is-luck" title={t('table.st.luck')}>
+                  🍀{_luck}
+                </span>
+              )}
+              {_ride && (
+                <span className="seat-status-badge is-ride" title={t('table.st.ride')}>
+                  🚕
+                </span>
+              )}
+              {_pf > 0 && (
+                <span className="seat-status-badge is-portfolio" title={t('table.st.portfolio')}>
+                  💼{_pf}
+                </span>
+              )}
+              {_pf > 0 && (
+                <span className={`seat-status-badge is-market ${marketTone(_market)}`} title={t('table.st.market')}>
+                  📈{fmtSigned(_market)}
+                </span>
+              )}
+              {_asleep && (
+                <span className="seat-status-badge is-asleep" title={t('table.st.asleep')}>
+                  💤
+                </span>
+              )}
+              {_sleepwalk && (
+                <span className="seat-status-badge is-sleepwalk" title={t('table.st.sleepwalk')}>
+                  🚶
+                </span>
+              )}
+              {_deferred > 0 && (
+                <span className="seat-status-badge is-snooze" title={t('table.st.snooze', { n: _deferred })}>
+                  🛌+{_deferred}
                 </span>
               )}
             </>

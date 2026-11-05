@@ -50,6 +50,9 @@
 | xiuying | 秀英 | Xiuying | 冰冻荔枝老奶 | Frozen Lychee Granny |
 | apple | 邪恶苹果头 | Evil Apple | Evil Apple | Rotten to the Core |
 | butcher | 屠夫 | Butcher | Butcher | The Cleaver |
+| driver | 司机小贾 | Driver Jia | 撞大运 | Jackpot Ride |
+| julia | Julia姐 | Julia | Julia | The Executive |
+| lazy_sheep | 懒懒羊 | Lazy Sheep | Lazy Sheep | Dream Weaver |
 
 ## 技能 Skills
 
@@ -81,6 +84,12 @@
 | 邪恶苹果头 | apple-bomb | 苹果 | Bad Apple |
 | 邪恶苹果头 | apple-throw | 投掷邪恶苹果 | Throw Evil Apple |
 | 屠夫 | butcher-skill | 剔骨 | Bone Carve |
+| 司机小贾 | driver-ride | 上车 | Hop In |
+| 司机小贾 | driver-lane | 变道 | Lane Change |
+| 司机小贾 | driver-luck | 老司机 | Old Hand |
+| Julia姐 | julia-invest | 建仓 | Open Position |
+| Julia姐 | julia-cashout | 平仓 | Cash Out |
+| 懒懒羊 | sheep-dream | 数羊 | Count Sheep |
 
 ### 技能内术语 Skill terms
 
@@ -150,3 +159,16 @@
 - **屠夫「对每名玩家冷却 5 回合，自己无冷却」**：按设计文档（只要有层数就能一直用）译为 "5-turn cooldown per target player; no cooldown otherwise"。
 - **混沌女王背景「爱人如养花，逢异惹心潮」**为意译诗句。
 - **免死金牌** → "Get Out of Death Free"（化用 Monopoly 的 "Get Out of Jail Free"）。
+
+## 梦境牌（懒懒羊专属）
+
+| id | 中文 | English |
+|---|---|---|
+| dream-snooze | 回笼觉 | Snooze |
+| dream-fleece | 羊毛毯 | Fleece Blanket |
+| dream-sense | 预知梦 | Prophetic Dream |
+| dream-weave | 造梦 | Dream Weave |
+| dream-nightmare | 噩梦 | Nightmare |
+| dream-sleepwalk | 梦游 | Sleepwalk |
+
+游戏术语：投资组合 = portfolio，大盘 = Market，牛市 / 震荡 / 熊市 = bull run / flat / crash，梦乡 = asleep，梦境牌 = dream card。

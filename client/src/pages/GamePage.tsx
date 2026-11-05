@@ -34,6 +34,9 @@ import {
   sendAppleEat,
   sendTearChoice,
   clearTearPrompt,
+  sendDreamPick,
+  clearDreamPrompt,
+  clearBombSense,
   stateLog,
   turnOrderList,
   useGame,
@@ -48,7 +51,13 @@ import { recordMatch } from '../lib/stats';
 import { advanceStage, endRun, loadRun, offerBonuses } from '../lib/run';
 import { CardView, setSkinMap } from '../components/CardView';
 import Modal from '../components/Modal';
-import { TableSeat, getSeatPositions, type TableSeatData } from '../components/table/TableSeat';
+import {
+  TableSeat,
+  fmtSigned,
+  getSeatPositions,
+  marketTone,
+  type TableSeatData,
+} from '../components/table/TableSeat';
 import { CHARACTER_RPG } from '@bombcat/shared';
 import { HandFan, type FanCard } from '../components/table/HandFan';
 import { Stage, type StageShow } from '../components/table/Stage';
@@ -70,7 +79,30 @@ function cardNeedsTarget(def: CardDef): boolean {
 /** 表情选项（与服务端白名单一致） */
 const EMOTE_CHOICES = ['😂', '😭', '😱', '😡', '👍', '👎', '❤️', '🎉', '💀', '🤔', '😼', '😸'];
 
+/**
+ * 外层守卫：没有房间/状态时只显示「连接中」（并在空闲时回大厅）。
+ * 牌桌本体 GameTable 只在 state 与 room 都存在时挂载——它内部有大量 hook，
+ * 不能放在提前 return 之后调用，否则状态在对局中丢失（断线等）时会触发 React 的 hook 数量错误。
+ */
 export default function GamePage() {
+  const game = useGame();
+  const { t } = useI18n();
+  const navigate = useNavigate();
+  const room = game.room;
+  useEffect(() => {
+    if (!room && game.status === 'idle') navigate('/lobby');
+  }, [room, game.status, navigate]);
+  if (!game.state || !room) {
+    return (
+      <div className="page">
+        <p className="muted">{t('game.connecting')}</p>
+      </div>
+    );
+  }
+  return <GameTable />;
+}
+
+function GameTable() {
   const game = useGame();
   const { t, lang } = useI18n();
   const navigate = useNavigate();
@@ -96,6 +128,10 @@ export default function GamePage() {
     targetSessionId: string;
     targetName: string;
   } | null>(null);
+  /** Julia：建仓 / 平仓 / 查看持仓弹窗 */
+  const [investOpen, setInvestOpen] = useState(false);
+  const [cashoutOpen, setCashoutOpen] = useState(false);
+  const [portfolioOpen, setPortfolioOpen] = useState(false);
   /** 邪恶苹果头：吃苹果弹窗（选一张手牌交出） */
   const [appleEatOpen, setAppleEatOpen] = useState(false);
   /** 日志面板（默认折叠，避免遮挡右上座位） */
@@ -328,15 +364,26 @@ export default function GamePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.subPhase, state?.alterBy, game.version]);
 
+  // Julia：回合切换 / 离开行动阶段时收起建仓、平仓弹窗（避免下回合自动重开）
+  useEffect(() => {
+    if (state?.subPhase === 'awaiting-action' && currentId === myId) return;
+    setInvestOpen(false);
+    setCashoutOpen(false);
+  }, [state?.subPhase, currentId, myId]);
+
+  // 懒懒羊：梦境选择阶段结束（超时自动选 / 已提交）→ 关闭弹窗
+  useEffect(() => {
+    if (!game.dreamPrompt) return;
+    if (state?.subPhase === 'awaiting-dream' && state?.dreamBy === myId) return;
+    const t = setTimeout(() => clearDreamPrompt(), 800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.subPhase, state?.dreamBy, game.dreamPrompt?.id]);
+
   /* ---------------- 派生数据（非 hook 部分） ---------------- */
 
-  if (!state || !room) {
-    return (
-      <div className="page">
-        <p className="muted">{t('game.connecting')}</p>
-      </div>
-    );
-  }
+  // 外层 GamePage 已保证 state/room 存在；这里只为类型收窄（同一快照下不会触发，hook 顺序因此恒定）
+  if (!state || !room) return null;
 
   const me = players.find((p) => p.sessionId === myId);
   const others = players.filter((p) => p.sessionId !== myId);
@@ -347,6 +394,31 @@ export default function GamePage() {
   /** 屠夫：我对某目标的剩余剔骨冷却 */
   const butcherCdOf = (sid: string): number =>
     ((me as any)?.butcherTargetCd?.get?.(sid) ?? (me as any)?.butcherTargetCd?.[sid] ?? 0) as number;
+  /** 司机小贾：可以邀请上车的人（存活、没冰冻、有手牌、不在车上、本回合没问过） */
+  const askedRide = ((me as any)?.askedRide?.toArray?.() ?? (me as any)?.askedRide ?? []) as string[];
+  const canInviteRide = (p: any): boolean =>
+    !!p.alive &&
+    p.sessionId !== myId &&
+    (p.freezeLayers ?? 0) <= 0 &&
+    (p.handCount ?? 0) > 0 &&
+    !p.freeRide &&
+    !askedRide.includes(p.sessionId);
+  /** 司机小贾：变道——按出牌顺序列出存活玩家，以及每人当前方向上的下家 */
+  const turnIds = turnOrderList(state) as string[];
+  const laneOrder: any[] = turnIds
+    .map((sid) => players.find((p) => p.sessionId === sid))
+    .filter((p) => p && p.alive);
+  const laneNextOf = (sid: string): any => {
+    const n = turnIds.length;
+    let i = turnIds.indexOf(sid);
+    const dir = (state?.direction as number) === -1 ? -1 : 1;
+    for (let step = 0; step < n; step++) {
+      i = (i + dir + n) % n;
+      const p = players.find((x) => x.sessionId === turnIds[i]);
+      if (p?.alive && p.sessionId !== sid) return p;
+    }
+    return undefined;
+  };
 
   const myHand: HandCard[] = game.hand;
   const myChar = BUILTIN_CHARACTERS.find((c) => c.id === me?.characterId);
@@ -395,6 +467,8 @@ export default function GamePage() {
     const hasFeral = plains.some((c) => c.def.feral);
     myHand.forEach((c) => {
       if (c.def.kind === 'defuse' || c.def.id === 'nope' || c.def.kind === 'streaking') return;
+      // 羊毛毯：被动牌，不能主动打出
+      if (c.def.id === 'dream-fleece') return;
       if (c.def.kind === 'plain') {
         // 同名 >=2，或有万能猫且场上普通猫 >=2
         if ((counts.get(c.def.id) ?? 0) >= 2 || (hasFeral && plains.length >= 2)) {
@@ -414,6 +488,7 @@ export default function GamePage() {
     state.nopeActive &&
     !!myNope &&
     !myLocked &&
+    !(me as any)?.asleep &&
     state.nopePlayBy !== myId &&
     nopedBy[nopedBy.length - 1] !== myId &&
     me?.alive;
@@ -514,6 +589,57 @@ export default function GamePage() {
 
   // 座位位置表按对手数缓存（稳定引用，避免 TableSeat memo 失效）
   const seatPositions = useMemo(() => getSeatPositions(others.length), [others.length]);
+  /**
+   * 对手座位按「出牌顺序」排列：从本机玩家的下家开始，沿当前方向依次排开。
+   * 这样变道 / 反转后座位会跟着移动，顺位角标 1 永远是你的下家。
+   */
+  const seatedOthers = useMemo(() => {
+    const ids = turnOrderList(state) as string[];
+    const n = ids.length;
+    const dir = (state?.direction as number) === -1 ? -1 : 1;
+    const start = ids.indexOf(myId ?? '');
+    if (start < 0 || n === 0) return others;
+    const ordered: any[] = [];
+    for (let k = 1; k < n; k++) {
+      const sid = ids[(start + dir * k + n * k) % n];
+      const p = others.find((o) => o.sessionId === sid);
+      if (p) ordered.push(p);
+    }
+    for (const p of others) if (!ordered.includes(p)) ordered.push(p);
+    return ordered;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game.version, state, myId, others.length]);
+  const orderNoOf = useMemo(() => {
+    const m = new Map<string, number>();
+    let k = 0;
+    for (const p of seatedOthers) if (p.alive) m.set(p.sessionId, ++k);
+    return m;
+  }, [seatedOthers]);
+
+  /* 司机小贾变道：序号变化 → 全场提示 + 两个座位高亮 */
+  const [swappedIds, setSwappedIds] = useState<string[]>([]);
+  const laneSeqSeen = useRef<number | null>(null);
+  useEffect(() => {
+    const seq = (state?.laneSwapSeq as number) ?? 0;
+    if (laneSeqSeen.current === null) {
+      laneSeqSeen.current = seq; // 进房/重连时不回放旧的变道
+      return;
+    }
+    if (seq === laneSeqSeen.current) return;
+    laneSeqSeen.current = seq;
+    const a = players.find((p) => p.sessionId === state.laneSwapA);
+    const b = players.find((p) => p.sessionId === state.laneSwapB);
+    if (!a || !b) return;
+    setSwappedIds([a.sessionId, b.sessionId]);
+    setSkillFlash({ id: Date.now(), text: t('game.laneFlash', { a: a.name, b: b.name }) });
+    sfx('skill');
+    const tm = setTimeout(() => {
+      setSwappedIds([]);
+      setSkillFlash(null);
+    }, 2200);
+    return () => clearTimeout(tm);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.laneSwapSeq]);
 
   // 香蕉女王的兑换入口（覆盖期间 2 张手牌 = 任意技能牌）
   const canBananaAction =
@@ -524,6 +650,21 @@ export default function GamePage() {
   const helpWaiting = state.helpOwnerId === myId && !!state.helpPendingBy;
   // 猪王：必须先处理消化牌
   const myMustPlay = (me?.mustPlayIid as string) || '';
+  // Julia：持仓 / 大盘（大盘存在 Julia 本人身上；有人持仓时顶栏显示）
+  const myPortfolioCount = ((me as any)?.portfolioCount ?? 0) as number;
+  const myMarket = ((me as any)?.market ?? 0) as number;
+  const marketHolder = players.find((p) => ((p as any).portfolioCount ?? 0) > 0);
+  const marketValue = ((marketHolder as any)?.market ?? 0) as number;
+  const investableCards = myHand.filter(
+    (c) => c.def.kind !== 'exploding' && c.def.kind !== 'streaking' && c.def.kind !== 'tear',
+  );
+  const investSkill = activeSkills.find((s) => s.effect.kind === 'juliaInvest');
+  const investEffect = investSkill?.effect.kind === 'juliaInvest' ? investSkill.effect : null;
+  // 懒懒羊：别人正在挑梦境牌
+  const dreamWaitingName =
+    state.subPhase === 'awaiting-dream' && state.dreamBy && state.dreamBy !== myId
+      ? (players.find((p) => p.sessionId === state.dreamBy)?.name ?? t('game.opponent'))
+      : '';
 
   return (
     <div
@@ -569,7 +710,7 @@ export default function GamePage() {
 
       {/* 对手席（围绕桌面分布） */}
       <div className="table-opponents">
-        {others.map((p, idx) => {
+        {seatedOthers.map((p, idx) => {
           const pos = seatPositions[idx] ?? { top: '0%', left: '50%' };
           return (
             <TableSeat
@@ -596,6 +737,15 @@ export default function GamePage() {
               appleTurns={(p.appleTurns as number) ?? 0}
               boneStacks={(p.boneStacks as number) ?? 0}
               locked={!!p.lockedBy}
+              luckCharges={(p.luckCharges as number) ?? 0}
+              freeRide={!!p.freeRide}
+              portfolioCount={(p.portfolioCount as number) ?? 0}
+              market={(p.market as number) ?? 0}
+              asleep={!!p.asleep}
+              sleepwalk={!!p.sleepwalk}
+              deferredDraw={(p.deferredDraw as number) ?? 0}
+              orderNo={orderNoOf.get(p.sessionId)}
+              swapped={swappedIds.includes(p.sessionId)}
             />
           );
         })}
@@ -672,6 +822,54 @@ export default function GamePage() {
                 🔒 {t('game.b.locked')}
               </span>
             )}
+            {me.characterId === 'driver' && (
+              <>
+                <span className="seat-status-badge is-luck" title={t('game.b.fareT')}>
+                  🚕 {t('game.b.fare')} {((me as any).fares ?? 0) % 3}/3
+                </span>
+                <span className="seat-status-badge is-luck" title={t('game.b.fareT')}>
+                  🍀 {t('game.b.luck')} ×{(me as any).luckCharges ?? 0}
+                </span>
+              </>
+            )}
+            {!!(me as any).freeRide && (
+              <span className="seat-status-badge is-ride" title={t('game.b.rideT')}>
+                🚕 {t('game.b.ride')}
+              </span>
+            )}
+            {myPortfolioCount > 0 && (
+              <>
+                <button
+                  type="button"
+                  className="seat-status-badge is-portfolio is-btn"
+                  title={t('game.b.portfolioT')}
+                  onClick={() => setPortfolioOpen(true)}
+                >
+                  💼 {t('game.b.portfolio', { k: myPortfolioCount, t: (me as any).portfolioTurns ?? 0 })}
+                </button>
+                <span
+                  className={`seat-status-badge is-market ${marketTone(myMarket)}`}
+                  title={t('game.b.marketT')}
+                >
+                  📈 {t('game.b.market')} {fmtSigned(myMarket)}
+                </span>
+              </>
+            )}
+            {!!(me as any).asleep && (
+              <span className="seat-status-badge is-asleep" title={t('game.b.asleepT')}>
+                💤 {t('game.b.asleep')}
+              </span>
+            )}
+            {!!(me as any).sleepwalk && (
+              <span className="seat-status-badge is-sleepwalk" title={t('game.b.sleepwalkT')}>
+                🚶 {t('game.b.sleepwalk')}
+              </span>
+            )}
+            {((me as any).deferredDraw ?? 0) > 0 && (
+              <span className="seat-status-badge is-snooze" title={t('game.b.snoozeT')}>
+                🛌 +{(me as any).deferredDraw}
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -709,6 +907,11 @@ export default function GamePage() {
           </button>
         )}
         {game.objectiveDone && <span className="obj-chip is-done">🎯 {objName(game.objectiveDone)} ✓</span>}
+        {marketHolder && (
+          <span className={`market-chip ${marketTone(marketValue)}`} title={t('game.b.marketT')}>
+            📈 {t('game.b.market')} {fmtSigned(marketValue)}
+          </span>
+        )}
         <span className={`status-turn ${isMyTurn ? 'is-mine' : ''}`}>
           {state.phase === 'finished'
             ? `🏆 ${t('game.finished')}`
@@ -884,7 +1087,11 @@ export default function GamePage() {
               const usesLeft = me?.skillUsesLeft?.get?.(skill.id) ?? me?.skillUsesLeft?.[skill.id] ?? 0;
               const kind = skill.effect.kind;
               const needsNoCost =
-                kind === 'bananaRage' || kind === 'chaosWarp' || kind === 'chaosTouch' || kind === 'futureRewrite';
+                kind === 'bananaRage' ||
+                kind === 'chaosWarp' ||
+                kind === 'chaosTouch' ||
+                kind === 'futureRewrite' ||
+                kind === 'sheepDream';
               const needsTargetOnly =
                 kind === 'pigGluttony' ||
                 kind === 'voyageSwap' ||
@@ -893,7 +1100,9 @@ export default function GamePage() {
                 kind === 'iceHelp' ||
                 kind === 'iceLychee' ||
                 kind === 'appleThrow' ||
-                kind === 'butcherCleave';
+                kind === 'butcherCleave' ||
+                kind === 'driverRide' ||
+                kind === 'driverLane';
               const eligibleTargets =
                 kind === 'bigEyeExpose'
                   ? others.filter((p) => p.alive && (p.archives ?? 0) >= 2)
@@ -909,7 +1118,10 @@ export default function GamePage() {
                       ? others.filter((p) => p.alive && ((p.appleTurns ?? 0) as number) === 0)
                       : kind === 'butcherCleave'
                         ? others.filter((p) => p.alive && butcherCdOf(p.sessionId) <= 0)
-                        : [];
+                        : kind === 'driverRide'
+                          ? others.filter((p) => canInviteRide(p))
+                          : [];
+              const aliveCount = players.filter((p) => p.alive).length;
               const boneCost = skill.effect.kind === 'butcherCleave' ? skill.effect.cost : 0;
               const bones = ((me as any)?.boneStacks ?? 0) as number;
               const disabled =
@@ -922,7 +1134,11 @@ export default function GamePage() {
                 // 秀英：冰冻时才可求助；解冻后才可喂荔枝（每回合 1 颗）
                 (kind === 'iceHelp' && (!myFrozenNow || eligibleTargets.length === 0)) ||
                 (kind === 'iceLychee' && (myFrozenNow || !!me?.lycheeGiven)) ||
-                (kind === 'appleThrow' && eligibleTargets.length === 0);
+                (kind === 'appleThrow' && eligibleTargets.length === 0) ||
+                (kind === 'driverRide' && eligibleTargets.length === 0) ||
+                (kind === 'driverLane' && aliveCount < 3) ||
+                (kind === 'juliaInvest' && (myPortfolioCount > 0 || investableCards.length === 0)) ||
+                (kind === 'juliaCashout' && myPortfolioCount <= 0);
               const sk = skillText(skill);
               const title = myLocked
                 ? t('game.sk.locked')
@@ -938,7 +1154,17 @@ export default function GamePage() {
                       ? t('game.sk.lycheeThawed')
                       : kind === 'appleThrow' && eligibleTargets.length === 0
                         ? t('game.sk.allApples')
-                        : sk.description;
+                        : kind === 'driverRide' && eligibleTargets.length === 0
+                          ? t('game.sk.noRiders')
+                          : kind === 'driverLane' && aliveCount < 3
+                            ? t('game.sk.laneFew')
+                            : kind === 'juliaInvest' && myPortfolioCount > 0
+                              ? t('game.sk.holding')
+                              : kind === 'juliaInvest' && investableCards.length === 0
+                                ? t('game.sk.noInvestable')
+                                : kind === 'juliaCashout' && myPortfolioCount <= 0
+                                  ? t('game.sk.noPosition')
+                                  : sk.description;
               return (
                 <button
                   key={skill.id}
@@ -950,12 +1176,19 @@ export default function GamePage() {
                       sendAct({ action: 'useSkill', skillId: skill.id });
                     } else if (needsTargetOnly) {
                       setSkillTargetPicker(skill.id);
+                    } else if (kind === 'juliaInvest') {
+                      setInvestOpen(true);
+                    } else if (kind === 'juliaCashout') {
+                      setCashoutOpen(true);
                     }
                   }}
                 >
                   {sk.name}
                   {cd > 0 && <span className="skill-cooldown">CD{cd}</span>}
-                  {kind === 'butcherCleave' ? ` 🔪${bones}/${boneCost}` : usesLeft > 0 && ` ×${usesLeft}`}
+                  {kind === 'butcherCleave'
+                    ? ` 🔪${bones}/${boneCost}`
+                    : // 只有带次数上限（uses）的技能才显示剩余次数；冷却制技能同步值恒为 1，不显示
+                      'uses' in skill.effect && usesLeft > 0 && ` ×${usesLeft}`}
                 </button>
               );
             })}
@@ -1288,10 +1521,11 @@ export default function GamePage() {
       {/* 主动技目标选择（吞噬/Voyage 交换/揭发等） */}
       <Modal open={!!skillTargetPicker} title={t('game.pickTarget')} onClose={() => setSkillTargetPicker(null)}>
         <div className="h-row">
-          {others
+          {(skillTargetPicker === 'driver-lane' ? laneOrder : others)
             .filter(
               (p) =>
                 p.alive &&
+                (skillTargetPicker !== 'driver-ride' || canInviteRide(p)) &&
                 (skillTargetPicker !== 'bigeye-expose' || (p.archives ?? 0) >= 2) &&
                 // 屠夫剔骨：冷却中的目标不列出
                 !(skillTargetPicker === 'butcher-skill' && butcherCdOf(p.sessionId) > 0) &&
@@ -1323,9 +1557,12 @@ export default function GamePage() {
                   });
                 }}
               >
-                {p.name}{t('game.lp')}{t('game.cardsN', { n: p.handCount })}
+                {skillTargetPicker === 'driver-lane'
+                  ? `${p.name} ⇄ ${laneNextOf(p.sessionId)?.name ?? '?'}`
+                  : <>{p.name}{t('game.lp')}{t('game.cardsN', { n: p.handCount })}</>}
+                {skillTargetPicker === 'driver-lane' ? null : <>
                 {skillTargetPicker === 'bigeye-expose' ? ` · 👁${t('game.b.archive')} ${p.archives ?? 0}` : ''}
-                {skillTargetPicker === 'butcher-skill' && (p.freezeLayers ?? 0) > 0 ? ` · ❄️${t('game.frozenImmune')}` : ''}{t('game.rp')}
+                {skillTargetPicker === 'butcher-skill' && (p.freezeLayers ?? 0) > 0 ? ` · ❄️${t('game.frozenImmune')}` : ''}{t('game.rp')}</>}
               </button>
             ))}
           {skillTargetPicker === 'bigeye-expose' &&
@@ -1369,6 +1606,64 @@ export default function GamePage() {
         <div className="help-waiting">🧊 {t('game.helpWaiting', { name: others.find((p) => p.sessionId === state.helpPendingBy)?.name ?? t('game.opponent') })}</div>
       )}
 
+      {/* 懒懒羊：等待对方挑选梦境牌 */}
+      {dreamWaitingName && (
+        <div className="help-waiting is-dream">💤 {t('game.dreamWaiting', { name: dreamWaitingName })}</div>
+      )}
+
+      {/* Julia：建仓 */}
+      <InvestModal
+        open={investOpen && !!canAct}
+        hand={myHand}
+        maxCards={investEffect?.maxCards ?? 3}
+        holdTurns={investEffect?.holdTurns ?? 2}
+        skillId={investSkill?.id ?? 'julia-invest'}
+        masked={bananaOverlay}
+        onClose={() => setInvestOpen(false)}
+      />
+
+      {/* Julia：平仓确认（同时展示持仓内容） */}
+      <Modal open={cashoutOpen && !!canAct && myPortfolioCount > 0} title={`💼 ${t('game.cashoutTitle')}`} onClose={() => setCashoutOpen(false)}>
+        <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>{t('game.cashoutBody')}</p>
+        <PortfolioCards cards={game.portfolio} market={myMarket} />
+        <div className="h-row" style={{ marginTop: 16 }}>
+          <button
+            className="primary"
+            onClick={() => {
+              sendAct({ action: 'useSkill', skillId: 'julia-cashout' });
+              setCashoutOpen(false);
+            }}
+          >
+            💼 {t('game.cashoutConfirm')}
+          </button>
+          <button onClick={() => setCashoutOpen(false)}>{t('game.thinkAgain')}</button>
+        </div>
+      </Modal>
+
+      {/* Julia：查看我的持仓 */}
+      <Modal
+        open={portfolioOpen && myPortfolioCount > 0}
+        title={`💼 ${t('game.portfolioTitle')}`}
+        onClose={() => setPortfolioOpen(false)}
+        footer={
+          <button className="primary" onClick={() => setPortfolioOpen(false)}>
+            {t('game.gotIt')}
+          </button>
+        }
+      >
+        <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>{t('game.b.marketT')}</p>
+        <PortfolioCards cards={game.portfolio} market={myMarket} />
+      </Modal>
+
+      {/* 懒懒羊：醒来挑梦境牌 */}
+      <DreamPickModal
+        info={game.dreamPrompt}
+        targets={others.filter((p) => p.alive)}
+      />
+
+      {/* 预知梦：牌堆顶爆炸位置 */}
+      <BombSenseModal info={game.bombSense} />
+
       {/* Voyage：换牌第二步——选自己要交出的 3 张牌 */}
       <VoyageGiveModal
         info={voyageGive}
@@ -1381,6 +1676,208 @@ export default function GamePage() {
 }
 
 /* ---------------- 子组件 ---------------- */
+
+/** Julia：持仓内容（仅本人可见） */
+function PortfolioCards({ cards, market }: { cards: CardDef[]; market: number }) {
+  const { t } = useI18n();
+  return (
+    <div>
+      <div className={`market-chip ${marketTone(market)}`} style={{ marginBottom: 10 }}>
+        📈 {t('game.marketNow', { n: fmtSigned(market) })}
+      </div>
+      <div className="h-row" style={{ flexWrap: 'wrap' }}>
+        {cards.map((c, i) => (
+          <CardView key={i} def={c} size="mini" />
+        ))}
+        {cards.length === 0 && <span className="muted">{t('game.portfolioEmpty')}</span>}
+      </div>
+    </div>
+  );
+}
+
+/** Julia：建仓（选 1~maxCards 张可投资手牌） */
+function InvestModal({
+  open,
+  hand,
+  maxCards,
+  holdTurns,
+  skillId,
+  masked,
+  onClose,
+}: {
+  open: boolean;
+  hand: HandCard[];
+  maxCards: number;
+  holdTurns: number;
+  skillId: string;
+  masked?: boolean;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const [picked, setPicked] = useState<string[]>([]);
+  useEffect(() => {
+    setPicked([]);
+  }, [open]);
+  const eligible = (c: HandCard) =>
+    c.def.kind !== 'exploding' && c.def.kind !== 'streaking' && c.def.kind !== 'tear';
+  const toggle = (iid: string) =>
+    setPicked((prev) =>
+      prev.includes(iid) ? prev.filter((x) => x !== iid) : prev.length >= maxCards ? prev : [...prev, iid],
+    );
+  return (
+    <Modal open={open} title={`💼 ${t('game.investTitle', { max: maxCards })}`} onClose={onClose}>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+        {t('game.investBody', { turns: holdTurns })}
+      </p>
+      <p className="muted" style={{ fontSize: 13, marginTop: 8 }}>
+        {t('game.investPicked', { n: picked.length, max: maxCards })}
+      </p>
+      <div className="h-row invest-pick" style={{ flexWrap: 'wrap', maxHeight: 260, overflowY: 'auto' }}>
+        {hand.map((c) => {
+          const ok = eligible(c);
+          return (
+            <CardView
+              key={c.instanceId}
+              def={c.def}
+              size="mini"
+              masked={masked}
+              selected={picked.includes(c.instanceId)}
+              onClick={ok ? () => toggle(c.instanceId) : undefined}
+              style={ok ? undefined : { opacity: 0.35, filter: 'grayscale(0.8)', cursor: 'not-allowed' }}
+            />
+          );
+        })}
+      </div>
+      <div className="h-row" style={{ marginTop: 16 }}>
+        <button
+          className="primary"
+          disabled={picked.length < 1 || picked.length > maxCards}
+          onClick={() => {
+            sendAct({ action: 'useSkill', skillId, investInstanceIds: picked });
+            onClose();
+          }}
+        >
+          💼 {t('game.investConfirm')}
+        </button>
+        <button onClick={onClose}>{t('game.cancel')}</button>
+      </div>
+    </Modal>
+  );
+}
+
+/** 懒懒羊：醒来从梦境牌中选 1 张（收下 / 送人） */
+function DreamPickModal({
+  info,
+  targets,
+}: {
+  info: { id: number; options: CardDef[] } | null;
+  targets: any[];
+}) {
+  const { t, lang } = useI18n();
+  const [pick, setPick] = useState<number | null>(null);
+  const [giving, setGiving] = useState(false);
+  useEffect(() => {
+    setPick(null);
+    setGiving(false);
+  }, [info?.id]);
+  const chosen = pick !== null ? info?.options[pick] : undefined;
+  const chosenText = chosen ? cardText(chosen, lang) : null;
+  return (
+    <Modal open={!!info} title={`💤 ${t('game.dreamTitle')}`}>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>{t('game.dreamBody')}</p>
+      <div className="h-row dream-options" style={{ justifyContent: 'center', gap: 18 }}>
+        {(info?.options ?? []).map((c, i) => (
+          <CardView
+            key={i}
+            def={c}
+            size="hand"
+            selected={pick === i}
+            glow={pick === null}
+            onClick={() => {
+              setPick(i);
+              setGiving(false);
+            }}
+          />
+        ))}
+      </div>
+      <p className="dream-desc">
+        {chosen && chosenText ? (
+          <>
+            <strong>
+              {chosen.emoji} {chosenText.name}
+            </strong>
+            {lang === 'zh' ? '：' : ': '}
+            {chosenText.description}
+          </>
+        ) : (
+          <span className="muted">{t('game.dreamPickFirst')}</span>
+        )}
+      </p>
+      <div className="h-row" style={{ marginTop: 14 }}>
+        <button
+          className="primary"
+          disabled={!chosen}
+          onClick={() => chosen && sendDreamPick(chosen.id)}
+        >
+          🛏️ {t('game.dreamKeep')}
+        </button>
+        <button
+          disabled={!chosen || targets.length === 0}
+          className={giving ? 'is-on' : ''}
+          onClick={() => setGiving((v) => !v)}
+        >
+          🎁 {t('game.dreamGive')}
+        </button>
+      </div>
+      {giving && chosen && (
+        <div style={{ marginTop: 12 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{t('game.dreamGiveTo')}</div>
+          <div className="h-row" style={{ flexWrap: 'wrap' }}>
+            {targets.map((p) => (
+              <button key={p.sessionId} className="primary" onClick={() => sendDreamPick(chosen.id, p.sessionId)}>
+                {p.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/** 预知梦：牌堆顶 checked 张里爆炸牌的位置 */
+function BombSenseModal({ info }: { info: { id: number; positions: number[]; checked: number } | null }) {
+  const { t } = useI18n();
+  const n = info?.checked ?? 5;
+  return (
+    <Modal
+      open={!!info}
+      title={`🔮 ${t('game.senseTitle')}`}
+      onClose={() => info && clearBombSense(info.id)}
+      footer={
+        <button className="primary" onClick={() => info && clearBombSense(info.id)}>
+          {t('game.gotIt')}
+        </button>
+      }
+    >
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+        {(info?.positions.length ?? 0) > 0 ? t('game.senseBody', { n }) : t('game.senseNone', { n })}
+      </p>
+      <div className="sense-slots">
+        {Array.from({ length: n }, (_, i) => {
+          const bomb = !!info?.positions.includes(i + 1);
+          return (
+            <div key={i} className={`sense-slot ${bomb ? 'is-bomb' : ''}`}>
+              <span className="sense-no">{i + 1}</span>
+              <span className="sense-icon">{bomb ? '💣' : '·'}</span>
+              <span className="sense-label">{bomb ? t('game.senseBomb') : t('game.senseSafe')}</span>
+            </div>
+          );
+        })}
+      </div>
+    </Modal>
+  );
+}
 
 /** 邪恶苹果头：吃掉身上的邪恶苹果（选一张手牌交给投掷者） */
 function AppleEatModal({
@@ -1442,7 +1939,7 @@ function HelpRequestModal({
   hand,
   onClose,
 }: {
-  info: { id: number; fromName: string } | null;
+  info: { id: number; fromName: string; kind: 'help' | 'ride' } | null;
   hand: HandCard[];
   onClose: () => void;
 }) {
@@ -1452,9 +1949,17 @@ function HelpRequestModal({
     setGiveId(null);
   }, [info?.id]);
   return (
-    <Modal open={!!info} title={`🧊 ${t('game.helpTitle', { name: info?.fromName ?? '' })}`} onClose={onClose}>
+    <Modal
+      open={!!info}
+      title={
+        info?.kind === 'ride'
+          ? `🚕 ${t('game.rideTitle', { name: info?.fromName ?? '' })}`
+          : `🧊 ${t('game.helpTitle', { name: info?.fromName ?? '' })}`
+      }
+      onClose={onClose}
+    >
       <p className="muted" style={{ fontSize: 13 }}>
-        {t('game.helpBody')}
+        {info?.kind === 'ride' ? t('game.rideBody') : t('game.helpBody')}
       </p>
       <p className="muted" style={{ fontSize: 13, marginTop: 8 }}>
         {t('game.pickGive')}{giveId ? t('game.picked1') : t('game.requiredIfAgree')}{t('game.colon')}
@@ -1477,7 +1982,7 @@ function HelpRequestModal({
           disabled={!giveId}
           onClick={() => sendHelpRespond(true, giveId!)}
         >
-          🤝 {t('game.helpAgree')}
+          {info?.kind === 'ride' ? `🚕 ${t('game.rideAgree')}` : `🤝 ${t('game.helpAgree')}`}
         </button>
         <button onClick={onClose}>🙅 {t('game.tearRefuse')}</button>
       </div>

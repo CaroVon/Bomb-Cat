@@ -26,7 +26,11 @@ export type CardEffectType =
   | 'swapHand' // 与目标玩家交换全部手牌
   | 'drawFromBottom' // 从牌堆底摸 1 张（不结束回合）
   | 'reverse' // 反转出牌方向
-  | 'selfDraw'; // 立即额外摸 count 张（不结束回合）
+  | 'selfDraw' // 立即额外摸 count 张（不结束回合）
+  // ---- 懒懒羊梦境牌 ----
+  | 'snooze' // 回笼觉：结束回合不摸牌，下一次摸牌多摸 1 张（摸牌延期）
+  | 'bombSense' // 预知梦：私密告知牌堆顶 count 张里哪几个位置是爆炸类牌
+  | 'buryBombs'; // 造梦：把牌堆顶 count 张里的爆炸类牌全部移到牌堆底
 
 /** 允许自定义卡牌使用的效果子集（排除会影响公平的内部原语） */
 export const CUSTOM_CARD_ALLOWED_EFFECTS: readonly CardEffectType[] = [
@@ -54,7 +58,7 @@ export interface CardEffect {
 
 /* ============================== 卡牌 ============================== */
 
-export type CardKind = 'exploding' | 'defuse' | 'action' | 'plain' | 'streaking' | 'tear';
+export type CardKind = 'exploding' | 'defuse' | 'action' | 'plain' | 'streaking' | 'tear' | 'dream'; // dream = 懒懒羊梦境牌（不进普通牌堆）
 
 export interface CardDef {
   /** 唯一 id；内置卡为短名，自定义卡必须带 "custom:" 前缀 */
@@ -136,7 +140,15 @@ export type SkillEffect =
   | { kind: 'appleBomb'; count: number } // 被动：开局往牌堆插入 N 张爆炸苹果
   | { kind: 'appleThrow'; cooldownTurns: number } // 主动：投掷邪恶苹果（目标可在自己回合吃掉）
   // ---- v5 新增原型（屠夫） ----
-  | { kind: 'butcherCleave'; maxStacks: number; cost: number; targetCooldown: number }; // 屠夫：剔骨层数 + 封锁抽牌（按目标冷却）
+  | { kind: 'butcherCleave'; maxStacks: number; cost: number; targetCooldown: number } // 屠夫：剔骨层数 + 封锁抽牌（按目标冷却）
+  // ---- v6 新增原型（司机小贾） ----
+  | { kind: 'driverRide'; cooldownTurns: number } // 主动：邀请上车（对方交 1 张牌，下回合免摸牌）
+  | { kind: 'driverLane'; cooldownTurns: number } // 主动：变道（交换两名相邻玩家座次）
+  | { kind: 'driverLuck'; faresPerLuck: number } // 被动：每 N 份车费 → 1 层撞大运（摸到爆炸自动放回）
+  // ---- v7 新增原型（Julia 姐 / 懒懒羊） ----
+  | { kind: 'juliaInvest'; maxCards: number; holdTurns: number; cooldownTurns: number } // 建仓：1~maxCards 张入投资组合，holdTurns 个本人回合后按大盘交割
+  | { kind: 'juliaCashout' } // 平仓：提前撤资，扣 1 张手续费
+  | { kind: 'sheepDream'; options: number; cooldownTurns: number }; // 数羊：结束回合入梦，醒来从 options 张梦境牌里选 1 张（留下或送人）
 
 export interface SkillDef {
   id: string;
@@ -233,6 +245,8 @@ export type ClientMessage =
       costInstanceIds?: string[];
       targetSessionId?: string;
       wantCardId?: string;
+      /** Julia 建仓：要放进投资组合的 1~3 张手牌 */
+      investInstanceIds?: string[];
     }
   /* ---- v2：五角色新消息 ---- */
   | { action: 'tearChoice'; accept: boolean; giveInstanceId?: string } // 眼泪选择：true=喂牌复活Nana
@@ -258,7 +272,9 @@ export type ClientMessage =
   | { action: 'exposePick'; instanceId: string } // 大眼Nana：揭发后点选要弃/抽的牌
   /* ---- v3：数学老师 / 秀英 ---- */
   | { action: 'helpRespond'; accept: boolean; giveInstanceId?: string } // 秀英求助：被求助者回应（同意需给一张牌）
-  | { action: 'appleEat'; giveInstanceId: string }; // 邪恶苹果头：吃掉身上的邪恶苹果（交出一张手牌给她）
+  | { action: 'appleEat'; giveInstanceId: string } // 邪恶苹果头：吃掉身上的邪恶苹果（交出一张手牌给她）
+  /* ---- v7：懒懒羊 ---- */
+  | { action: 'dreamPick'; cardId: string; giveTo?: string }; // 醒来选梦境牌：giveTo 为空 = 自己收下
 
 /** 服务端 → 客户端（私密/一次性消息；公开状态走 schema 同步） */
 export type ServerMessage =
@@ -291,10 +307,15 @@ export type ServerMessage =
       mode: 'view' | 'discard' | 'steal';
     } // 大眼Nana：揭发展示目标牌面（discard/steal 需点选一张）
   /* ---- v3：数学老师 / 秀英 ---- */
-  | { action: 'helpPrompt'; fromName: string } // 秀英向你求助：是否给一张牌帮她解冻
-  | { action: 'helpResolved'; accepted: boolean; helperName?: string } // 求助结果（给秀英）
+  | { action: 'helpPrompt'; fromName: string; kind?: 'help' | 'ride' } // 秀英求助 / 小贾邀请上车：是否交一张牌
+  | { action: 'helpResolved'; accepted: boolean; helperName?: string; kind?: 'help' | 'ride' } // 求助/上车结果（给秀英 / 小贾）
   /* ---- v4：邪恶苹果头 ---- */
-  | { action: 'appleGiven'; fromName: string; turns: number }; // 你被投掷了邪恶苹果（可在自己回合吃掉）
+  | { action: 'appleGiven'; fromName: string; turns: number } // 你被投掷了邪恶苹果（可在自己回合吃掉）
+  /* ---- v7：Julia 姐 / 懒懒羊 ---- */
+  | { action: 'portfolio'; cards: CardDef[] } // Julia：你的投资组合内容（仅本人可见；空数组 = 已清仓）
+  | { action: 'dreamPrompt'; options: CardDef[] } // 懒懒羊醒来：从这几张梦境牌里选 1 张
+  | { action: 'bombSense'; positions: number[]; checked: number } // 预知梦：牌堆顶 checked 张中爆炸牌的位置（1 = 顶）
+  | { action: 'dreamGiven'; fromName: string; cardId: string }; // 你收到了懒懒羊送的梦境牌
 
 /** 手牌中的单张实例（发给本人时带定义） */
 export interface HandCard {

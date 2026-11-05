@@ -168,7 +168,7 @@ function SkinSection() {
                   style={{ maxWidth: 220 }}
                 >
                   <option value="">{t('skin.selectCard')}</option>
-                  {BUILTIN_CARDS.filter((c) => c.kind !== 'exploding').map((c) => (
+                  {BUILTIN_CARDS.filter((c) => c.kind !== 'exploding' && c.kind !== 'dream' && c.kind !== 'tear').map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.emoji} {cardName(c.id, lang)}
                     </option>
